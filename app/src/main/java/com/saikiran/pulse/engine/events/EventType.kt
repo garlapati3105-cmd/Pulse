@@ -11,4 +11,5 @@ enum class EventType {
     PERSON_PASSING_BY,
     PERSON_TRACK_LOST,
     PERSON_LEFT_VIEW,
+    ENVIRONMENTAL_SOUND,
 }

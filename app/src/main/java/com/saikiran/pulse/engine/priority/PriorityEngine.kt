@@ -64,6 +64,11 @@ class PriorityEngine(
                 EventType.PERSON_APPROACHING  -> 40
                 EventType.PERSON_ENTERED_VIEW -> 25
                 EventType.PERSON_STOPPED      -> 20
+                EventType.ENVIRONMENTAL_SOUND -> {
+                    if (event.description.contains("VEHICLE_HORN") || event.description.contains("SIREN") || event.description.contains("ALARM")) 50
+                    else if (event.description.contains("DOORBELL") || event.description.contains("DOOR")) 25
+                    else 10
+                }
                 EventType.PERSON_LEFT_VIEW    -> 15
                 EventType.PERSON_TRACK_LOST   -> 15
                 EventType.PERSON_MOVING_AWAY  -> 15

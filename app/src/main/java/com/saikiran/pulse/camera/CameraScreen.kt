@@ -139,6 +139,16 @@ fun CameraScreen(
     val audioState by audioPerceptionManager.stateFlow.collectAsStateWithLifecycle()
     val latestAudioEvent by audioPerceptionManager.latestAudioEventFlow.collectAsStateWithLifecycle()
 
+    // Pass detected environmental sounds to SensorFusionEngine (Milestone 7B)
+    LaunchedEffect(latestAudioEvent) {
+        latestAudioEvent?.let { audioEvent ->
+            personDetector.fusionEngine.onAudioEvent(audioEvent)
+        }
+    }
+    
+    // Lifecycle-aware collection of Fused Events (Milestone 7B)
+    val latestFusedEvent by personDetector.fusionEngine.latestFusedEventFlow.collectAsStateWithLifecycle()
+
     // Register volume hardware key handlers for hands-free queries (Priority P2)
     LaunchedEffect(events) {
         onRegisterVolumeKeyHandlers?.invoke(
@@ -356,6 +366,61 @@ fun CameraScreen(
                         color = Color.LightGray,
                         style = MaterialTheme.typography.labelSmall,
                     )
+                }
+            }
+            
+            // ── Sensor Fusion Engine Debug Panel (Milestone 7B) ─────────────
+            latestFusedEvent?.let { fused ->
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(Color.Black.copy(alpha = 0.75f))
+                        .padding(10.dp)
+                ) {
+                    Column {
+                        Text(
+                            text = "── Sensor Fusion Engine (7B) ──",
+                            color = Color(0xFFE040FB), // Purple
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                        )
+                        Text(
+                            text = "Event: ${fused.eventType.name}",
+                            color = Color.White,
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                        Text(
+                            text = "Vision Conf: ${fused.visionConfidence?.let { "${(it * 100).toInt()}%" } ?: "N/A"}",
+                            color = Color.LightGray,
+                            style = MaterialTheme.typography.labelSmall,
+                        )
+                        Text(
+                            text = "Audio: ${fused.audioType ?: "NONE"} ${fused.audioConfidence?.let { "(${(it * 100).toInt()}%)" } ?: ""}",
+                            color = Color.LightGray,
+                            style = MaterialTheme.typography.labelSmall,
+                        )
+                        Text(
+                            text = "IMU State: ${fused.imuState ?: "N/A"}",
+                            color = Color.LightGray,
+                            style = MaterialTheme.typography.labelSmall,
+                        )
+                        Text(
+                            text = "Fused Confidence: ${(fused.fusedConfidence * 100).toInt()}%",
+                            color = if (fused.fusedConfidence >= 0.7f) Color(0xFF00E676) else if (fused.fusedConfidence >= 0.45f) Color(0xFFFFB74D) else Color.Red,
+                            style = MaterialTheme.typography.bodySmall,
+                            fontWeight = FontWeight.Bold,
+                        )
+                        Text(
+                            text = "Sources: ${fused.supportingSources.joinToString(" + ") { it.name }}",
+                            color = Color(0xFF29B6F6),
+                            style = MaterialTheme.typography.labelSmall,
+                        )
+                        Text(
+                            text = "Reason: ${fused.reason}",
+                            color = Color.LightGray,
+                            style = MaterialTheme.typography.labelSmall,
+                        )
+                    }
                 }
             }
         }

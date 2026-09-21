@@ -35,6 +35,7 @@ data class PulseEvent(
             EventType.PERSON_PASSING_BY   -> "PASSING_BY"
             EventType.PERSON_TRACK_LOST   -> "TRACK_LOST"
             EventType.PERSON_LEFT_VIEW    -> "LEFT_VIEW"
+            EventType.ENVIRONMENTAL_SOUND -> "SOUND"
         }
         val posSuffix = spatialPosition?.shortDescription?.let { " ($it)" } ?: ""
         "${trackId}_$typeLabel$posSuffix"

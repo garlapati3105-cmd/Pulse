@@ -10,6 +10,7 @@ import com.google.mediapipe.tasks.vision.core.RunningMode
 import com.google.mediapipe.tasks.vision.objectdetector.ObjectDetector
 import com.saikiran.pulse.engine.events.SemanticEventProcessor
 import com.saikiran.pulse.engine.events.TemporalEventStore
+import com.saikiran.pulse.engine.fusion.SensorFusionEngine
 import com.saikiran.pulse.perception.sensors.PhoneMotionState
 import com.saikiran.pulse.perception.sensors.SensorMotionMonitor
 import com.saikiran.pulse.perception.vision.movement.MovementAnalyzer
@@ -36,7 +37,11 @@ class PersonDetector(
 
     /** In-memory rolling temporal event store. */
     val eventStore = TemporalEventStore()
-    private val eventProcessor = SemanticEventProcessor(eventStore)
+    
+    /** Sensor Fusion Engine (Milestone 7B) */
+    val fusionEngine = SensorFusionEngine(eventStore)
+    
+    private val eventProcessor = SemanticEventProcessor(fusionEngine, eventStore)
 
     companion object {
         private const val TAG = "PersonDetector"
@@ -128,10 +133,11 @@ class PersonDetector(
                         )
                     }
 
-                    // Emit non-duplicate semantic events on state transitions to TemporalEventStore
+                    // Emit non-duplicate semantic events on state transitions to SensorFusionEngine
                     eventProcessor.processFrame(
                         detections = classifiedDetections,
                         droppedTracks = personTracker.getDroppedTracks(),
+                        phoneMotionState = currentPhoneMotion,
                         timestampMs = System.currentTimeMillis(),
                     )
 

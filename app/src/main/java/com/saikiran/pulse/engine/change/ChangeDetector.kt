@@ -28,7 +28,7 @@ class ChangeDetector(
      */
     fun processEvent(event: PulseEvent) {
         synchronized(lock) {
-            val changeType = mapEventTypeToChangeType(event.eventType)
+            val changeType = mapEventTypeToChangeType(event.eventType) ?: return
 
             val description = generateConservativeDescription(changeType)
 
@@ -82,7 +82,7 @@ class ChangeDetector(
         }
     }
 
-    private fun mapEventTypeToChangeType(eventType: EventType): ChangeType {
+    private fun mapEventTypeToChangeType(eventType: EventType): ChangeType? {
         return when (eventType) {
             EventType.PERSON_ENTERED_VIEW -> ChangeType.PERSON_ENTERED_VIEW
             EventType.PERSON_APPROACHING  -> ChangeType.PERSON_APPROACHING
@@ -91,6 +91,7 @@ class ChangeDetector(
             EventType.PERSON_PASSING_BY   -> ChangeType.PERSON_PASSING_BY
             EventType.PERSON_TRACK_LOST   -> ChangeType.PERSON_TRACK_LOST
             EventType.PERSON_LEFT_VIEW    -> ChangeType.PERSON_LEFT_VIEW
+            EventType.ENVIRONMENTAL_SOUND -> null
         }
     }
 

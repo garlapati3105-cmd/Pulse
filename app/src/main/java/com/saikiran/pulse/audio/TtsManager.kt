@@ -2,6 +2,7 @@ package com.saikiran.pulse.audio
 
 import android.content.Context
 import android.media.AudioAttributes
+import android.media.AudioManager
 import android.os.Bundle
 import android.speech.tts.TextToSpeech
 import android.util.Log
@@ -12,8 +13,8 @@ import java.util.Locale
  *
  * Responsibilities:
  *  1. Initialises Android [TextToSpeech] asynchronously with default device locale fallback.
- *  2. Configures speech audio attributes for accessibility/speech output.
- *  3. Speaks natural language summaries aloud on explicit user request.
+ *  2. Configures speech audio attributes for standard media/speech playback ([AudioManager.STREAM_MUSIC]).
+ *  3. Speaks natural language summaries aloud on explicit user request or proactive alerts.
  *  4. Flushes speech queue to interrupt current speech when new requests arrive.
  *  5. Queues early requests if invoked prior to TTS initialization completing.
  *  6. Releases TTS native resources cleanly when component is destroyed.
@@ -53,10 +54,10 @@ class TtsManager(context: Context) : TextToSpeech.OnInitListener {
                 isInitialized = true
                 Log.d(TAG, "TextToSpeech initialised successfully.")
 
-                // Set AudioAttributes for speech output
+                // Set AudioAttributes for standard media speaker output
                 try {
                     val audioAttributes = AudioAttributes.Builder()
-                        .setUsage(AudioAttributes.USAGE_ASSISTANCE_ACCESSIBILITY)
+                        .setUsage(AudioAttributes.USAGE_MEDIA)
                         .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
                         .build()
                     tts?.setAudioAttributes(audioAttributes)
@@ -92,6 +93,7 @@ class TtsManager(context: Context) : TextToSpeech.OnInitListener {
 
         try {
             val params = Bundle().apply {
+                putInt(TextToSpeech.Engine.KEY_PARAM_STREAM, AudioManager.STREAM_MUSIC)
                 putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, 1.0f)
             }
             val status = tts?.speak(text, TextToSpeech.QUEUE_FLUSH, params, UTTERANCE_ID)
