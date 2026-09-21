@@ -21,13 +21,14 @@ import java.util.Locale
 /**
  * On-Device Voice Command Manager for explicit hands-free control.
  *
- * Requirements & Behavior:
- *  1. Checks on-device speech recognition availability ([SpeechRecognizer.isOnDeviceRecognitionAvailable]).
- *  2. Creates on-device [SpeechRecognizer] instance ([SpeechRecognizer.createOnDeviceSpeechRecognizer]).
- *  3. Fallback: Handles OxygenOS early speech timeouts by seamlessly falling back to system recognizer.
- *  4. Single-shot explicit session (begins ONLY on explicit user trigger, closes mic immediately on end).
- *  5. Main-thread execution for all Android SpeechRecognizer API calls.
- *  6. Coordinates microphone access by pausing environmental audio perception during active voice input.
+ * Architecture & Requirements:
+ *  1. Local-Only Speech Recognition: Strictly uses [SpeechRecognizer.createOnDeviceSpeechRecognizer].
+ *  2. Availability Check: Checks [SpeechRecognizer.isOnDeviceRecognitionAvailable].
+ *  3. No Cloud Fallback: Refuses silent fallback to remote/cloud speech services.
+ *  4. Graceful Error Handling: If local recognition is unavailable or times out, communicates failure gracefully.
+ *  5. Single-shot explicit session (begins ONLY on explicit user trigger, closes mic immediately on end).
+ *  6. Main-thread execution for all Android SpeechRecognizer API calls.
+ *  7. Coordinates microphone access by pausing environmental audio perception during active voice input.
  */
 class VoiceCommandManager(
     private val context: Context,
@@ -47,7 +48,6 @@ class VoiceCommandManager(
     val statusMessageFlow: StateFlow<String> = _statusMessageFlow.asStateFlow()
 
     private var speechRecognizer: SpeechRecognizer? = null
-    private var isFallbackSession = false
 
     @Volatile
     var isOnDeviceAvailable: Boolean = false
@@ -90,15 +90,6 @@ class VoiceCommandManager(
         onListeningEnded: () -> Unit,
         onCommandExecuted: (String, VoiceCommand) -> Unit,
     ) {
-        isFallbackSession = false
-        startListeningInternal(onListeningStarted, onListeningEnded, onCommandExecuted)
-    }
-
-    private fun startListeningInternal(
-        onListeningStarted: () -> Unit,
-        onListeningEnded: () -> Unit,
-        onCommandExecuted: (String, VoiceCommand) -> Unit,
-    ) {
         mainHandler.post {
             if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO)
                 != PackageManager.PERMISSION_GRANTED
@@ -106,6 +97,13 @@ class VoiceCommandManager(
                 _stateFlow.value = VoiceCommandState.ERROR
                 _statusMessageFlow.value = "Microphone permission denied."
                 Log.w(TAG, "Cannot start voice command: RECORD_AUDIO permission denied")
+                return@post
+            }
+
+            if (!isOnDeviceAvailable && !checkOnDeviceAvailability()) {
+                _stateFlow.value = VoiceCommandState.ERROR
+                _statusMessageFlow.value = "On-device voice input is temporarily unavailable."
+                Log.w(TAG, "On-device speech recognition unavailable; cloud fallback strictly prohibited.")
                 return@post
             }
 
@@ -122,7 +120,7 @@ class VoiceCommandManager(
             // Allow 250ms delay for background AudioRecord to release microphone hardware cleanly
             mainHandler.postDelayed({
                 try {
-                    val recognizer = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && isOnDeviceAvailable && !isFallbackSession) {
+                    val recognizer = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && isOnDeviceAvailable) {
                         SpeechRecognizer.createOnDeviceSpeechRecognizer(context)
                     } else {
                         SpeechRecognizer.createSpeechRecognizer(context)
@@ -133,11 +131,9 @@ class VoiceCommandManager(
                     val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
                         putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
                         putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault().toLanguageTag())
+                        putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
                         putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
                         putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, false)
-                        if (isOnDeviceAvailable && !isFallbackSession) {
-                            putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
-                        }
                     }
 
                     recognizer.setRecognitionListener(object : RecognitionListener {
@@ -167,19 +163,8 @@ class VoiceCommandManager(
                             val errorReason = mapErrorToString(error)
                             Log.e(TAG, "SpeechRecognizer onError: $errorReason ($error)")
 
-                            // Handle OEM early timeout: if on-device failed immediately, fallback once to system recognizer
-                            if ((error == SpeechRecognizer.ERROR_NO_MATCH || error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT || error == SpeechRecognizer.ERROR_CLIENT) && !isFallbackSession) {
-                                Log.w(TAG, "Early on-device speech error ($errorReason). Retrying with system recognizer...")
-                                isFallbackSession = true
-                                destroyRecognizer()
-                                mainHandler.postDelayed({
-                                    startListeningInternal(onListeningStarted, onListeningEnded, onCommandExecuted)
-                                }, 150L)
-                                return
-                            }
-
                             _stateFlow.value = VoiceCommandState.ERROR
-                            _statusMessageFlow.value = "Voice Status: $errorReason"
+                            _statusMessageFlow.value = "On-device voice input error: $errorReason"
 
                             // Restore Environmental Audio Classifier & cleanup
                             onListeningEnded()
@@ -220,7 +205,7 @@ class VoiceCommandManager(
                 } catch (e: Exception) {
                     Log.e(TAG, "Failed to start SpeechRecognizer session", e)
                     _stateFlow.value = VoiceCommandState.ERROR
-                    _statusMessageFlow.value = "Failed to start speech recognizer: ${e.message}"
+                    _statusMessageFlow.value = "On-device voice input unavailable: ${e.message}"
                     onListeningEnded()
                     destroyRecognizer()
                 }

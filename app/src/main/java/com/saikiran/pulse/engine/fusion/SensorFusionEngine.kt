@@ -15,13 +15,14 @@ import java.util.ArrayDeque
 /**
  * Deterministic Sensor Fusion Engine combining Vision, Audio, and IMU observations.
  *
- * Rules:
- *  - CASE A: Vision = APPROACHING + IMU = STABLE -> increase confidence slightly.
+ * Rules & Calibration:
+ *  - CASE A: Vision = APPROACHING + IMU = STABLE -> increase confidence conservatively.
  *  - CASE B: Vision = APPROACHING + Audio = FOOTSTEPS + IMU = STABLE -> increase confidence strongly.
  *  - CASE C: Vision = APPROACHING + IMU = MOVING -> reduce confidence heavily.
  *  - CASE D: Vision = APPROACHING + No Audio -> no penalty.
- *  - CASE E: Audio = VEHICLE_HORN + Vision evidence -> emit fused ENVIRONMENTAL_SOUND.
+ *  - CASE E: Audio = VEHICLE_HORN -> audio event preserved as AUDIO source. Does NOT infer vehicle visible from person presence.
  *  - CASE F: Audio only -> emit AUDIO-only ENVIRONMENTAL_SOUND.
+ *  - Confidence Calibration: Fused confidence is conservatively capped at 0.92f (never absolute 1.0f certainty).
  *
  * Outputs to [TemporalEventStore].
  */
@@ -35,6 +36,10 @@ class SensorFusionEngine(
 
     private val _latestFusedEventFlow = MutableStateFlow<FusedEvent?>(null)
     val latestFusedEventFlow: StateFlow<FusedEvent?> = _latestFusedEventFlow.asStateFlow()
+
+    companion object {
+        private const val MAX_FUSED_CONFIDENCE = 0.92f // Conservative calibration (avoids false 1.0 certainty)
+    }
 
     fun onVisionEvent(visionEvent: PulseEvent, motionState: PhoneMotionState) {
         synchronized(lock) {
@@ -57,24 +62,24 @@ class SensorFusionEngine(
             if (visionEvent.eventType == EventType.PERSON_APPROACHING) {
                 if (motionState == PhoneMotionState.CAMERA_MOVING) {
                     // CASE C: Camera is moving -> penalize strongly
-                    fusedConfidence = (fusedConfidence - 0.4f).coerceAtLeast(0.1f)
+                    fusedConfidence = (fusedConfidence - 0.40f).coerceAtLeast(0.15f)
                     sources.add(EventSource.IMU)
                     reason = "Visual approach confidence heavily reduced due to CAMERA_MOVING."
                 } else if (hasFootsteps) {
-                    // CASE B: Approach + Footsteps + Stable Camera -> boost strongly
-                    fusedConfidence = (fusedConfidence + 0.25f).coerceAtMost(1.0f)
+                    // CASE B: Approach + Footsteps + Stable Camera -> boost strongly, capped at 0.92
+                    fusedConfidence = (fusedConfidence + 0.15f).coerceAtMost(MAX_FUSED_CONFIDENCE)
                     sources.add(EventSource.AUDIO)
                     sources.add(EventSource.IMU)
                     reason = "Visual approach strongly supported by audible FOOTSTEPS and stable camera."
                 } else {
-                    // CASE A: Approach + Stable Camera (No audio) -> boost slightly
-                    fusedConfidence = (fusedConfidence + 0.1f).coerceAtMost(1.0f)
+                    // CASE A: Approach + Stable Camera (No audio) -> boost conservatively, capped at 0.92
+                    fusedConfidence = (fusedConfidence + 0.08f).coerceAtMost(MAX_FUSED_CONFIDENCE)
                     sources.add(EventSource.IMU)
                     reason = "Visual approach supported by stable camera."
                 }
             } else {
                 if (motionState == PhoneMotionState.CAMERA_MOVING) {
-                    fusedConfidence = (fusedConfidence - 0.2f).coerceAtLeast(0.1f)
+                    fusedConfidence = (fusedConfidence - 0.20f).coerceAtLeast(0.15f)
                     sources.add(EventSource.IMU)
                     reason = "Vision confidence reduced due to camera motion."
                 }
@@ -116,16 +121,15 @@ class SensorFusionEngine(
                 now - it.timestamp <= temporalWindowMs
             }
 
-            var fusedConfidence = audioEvent.confidence
+            var fusedConfidence = audioEvent.confidence.coerceAtMost(MAX_FUSED_CONFIDENCE)
             val sources = mutableListOf(EventSource.AUDIO)
-            var reason = "Audio-only detection."
+            var reason = "Audio-only detection: ${audioEvent.soundType.name}."
 
-            // CASE E: VEHICLE_HORN / SIREN + Visual Evidence
+            // CASE E: VEHICLE_HORN / SIREN - Audio event remains AUDIO source.
+            // Presence of a person is NOT visual evidence of a vehicle.
             if (audioEvent.soundType == SoundType.VEHICLE_HORN || audioEvent.soundType == SoundType.SIREN) {
                 if (supportingVision.isNotEmpty()) {
-                    fusedConfidence = (fusedConfidence + 0.2f).coerceAtMost(1.0f)
-                    sources.add(EventSource.VISION)
-                    reason = "${audioEvent.soundType.name} supported by nearby visual presence."
+                    reason = "${audioEvent.soundType.name} detected while a person is present in view."
                 }
             }
 
@@ -152,7 +156,7 @@ class SensorFusionEngine(
                     trackId = "AUDIO_${audioEvent.soundType.name}",
                     eventType = EventType.ENVIRONMENTAL_SOUND,
                     confidence = fusedConfidence,
-                    source = if (sources.size > 1) EventSource.FUSED else EventSource.AUDIO,
+                    source = EventSource.AUDIO,
                     spatialPosition = null,
                     description = audioEvent.soundType.name
                 )

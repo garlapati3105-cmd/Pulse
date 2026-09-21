@@ -38,7 +38,7 @@ data class TrackDropInfo(
 
 /**
  * Lightweight IoU and Centroid-distance based temporal tracker for detected persons across consecutive camera frames.
- * Includes short-term Re-ID memory across brief occlusions/exits.
+ * Includes short-term Re-ID memory across brief occlusions/exits and unified cost-matrix assignment to prevent ID swapping.
  *
  * Configuration:
  *  - [maxMissedFrames] = 25 frames (~800ms at 30 FPS). Survives temporary frame drops/occlusions.
@@ -103,12 +103,13 @@ class PersonTracker(
         val matchedTracks = BooleanArray(activeTracks.size)
         val matchedDetections = BooleanArray(rawDetections.size)
 
-        // Build list of candidate associations
+        // Build list of candidate associations with unified tracking cost
         data class MatchCandidate(
             val trackIdx: Int,
             val detIdx: Int,
             val iou: Float,
             val distRatio: Float,
+            val cost: Float, // Unified tracking cost combining IoU error and normalized centroid distance
         )
 
         val candidates = mutableListOf<MatchCandidate>()
@@ -121,23 +122,15 @@ class PersonTracker(
                 val distRatio = calculateCentroidDistance(track.boundingBox, det.boundingBox) / diag
 
                 if ((iou >= iouThreshold) || (distRatio <= maxCentroidDistanceRatio)) {
-                    candidates.add(MatchCandidate(tIdx, dIdx, iou, distRatio))
+                    // Cost formula: 60% IoU error + 40% Centroid Distance ratio (prevents ID swapping when tracks cross)
+                    val cost = (1f - iou) * 0.6f + distRatio * 0.4f
+                    candidates.add(MatchCandidate(tIdx, dIdx, iou, distRatio, cost))
                 }
             }
         }
 
-        // Sort candidate matches: higher IoU first, then smaller centroid distance
-        candidates.sortWith { a, b ->
-            if ((a.iou > 0f) && (b.iou > 0f)) {
-                b.iou.compareTo(a.iou)
-            } else if (a.iou > 0f) {
-                -1
-            } else if (b.iou > 0f) {
-                1
-            } else {
-                a.distRatio.compareTo(b.distRatio)
-            }
-        }
+        // Sort candidate matches by lowest tracking cost
+        candidates.sortBy { it.cost }
 
         // Greedily assign matches
         for (candidate in candidates) {

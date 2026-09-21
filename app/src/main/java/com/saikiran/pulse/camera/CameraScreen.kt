@@ -167,15 +167,11 @@ fun CameraScreen(
         { text, command ->
             when (command) {
                 VoiceCommand.SHOW_CURRENT_SITUATION -> {
+                    val summary = EventSummarizer.summarizeCurrentSituation(events)
                     currentSummaryTitle = "Current Situation"
-                    currentSummaryResult = SummaryResult(
-                        text = "Current situation requested: Monitoring active scene.",
-                        averageConfidence = 1.0f,
-                        isLowConfidence = false,
-                        eventCount = events.size,
-                    )
+                    currentSummaryResult = summary
                     showSummaryDialog = true
-                    ttsManager.speak("Current situation requested.")
+                    ttsManager.speak(summary.text)
                 }
 
                 VoiceCommand.SHOW_RECENT_EVENT_SUMMARY -> {

@@ -49,16 +49,17 @@ object CommandParser {
                     normalized.contains("say again") ||
                     normalized.contains("repeat") -> VoiceCommand.REPEAT_LAST_RESPONSE
 
-            // E: Mute / Stop talking
-            normalized.contains("stop talking") ||
-                    normalized.contains("be quiet") ||
-                    normalized.contains("mute") ||
-                    normalized.contains("quiet") -> VoiceCommand.MUTE_PROACTIVE_VOICE
-
             // F: Unmute / Start speaking
             normalized.contains("unmute") ||
                     normalized.contains("start speaking") ||
                     normalized.contains("speak") -> VoiceCommand.UNMUTE_PROACTIVE_VOICE
+
+            // E: Mute / Stop talking
+            normalized.contains("stop talking") ||
+                    normalized.contains("be quiet") ||
+                    normalized == "mute" ||
+                    normalized.contains("mute voice") ||
+                    normalized.contains("quiet") -> VoiceCommand.MUTE_PROACTIVE_VOICE
 
             else -> VoiceCommand.UNKNOWN
         }

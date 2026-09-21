@@ -5,7 +5,7 @@ import com.saikiran.pulse.engine.events.PulseEvent
 
 /**
  * Deterministic natural-language event summarizer converting recent temporal events into concise,
- * human-readable descriptions ("What Just Happened?").
+ * human-readable descriptions ("What Just Happened?" and "What's Happening?").
  *
  * Design Guidelines & Behavior:
  *  1. Reads recent events from [PulseEvent] stream (rolling 20-second window).
@@ -23,7 +23,7 @@ object EventSummarizer {
     private const val LOW_CONFIDENCE_THRESHOLD = 0.45f
 
     /**
-     * Summarize recent events from rolling event store.
+     * Summarize recent events from rolling event store ("What Just Happened?").
      *
      * @param events List of recent chronological events.
      * @return [SummaryResult] containing formatted natural language summary.
@@ -96,6 +96,88 @@ object EventSummarizer {
             else -> {
                 "Multiple people ($maxConcurrent) were detected moving nearby."
             }
+        }
+
+        return SummaryResult(
+            text = summaryText,
+            averageConfidence = avgConfidence,
+            isLowConfidence = false,
+            eventCount = events.size,
+        )
+    }
+
+    /**
+     * Summarize current situation based on active ongoing evidence ("What's Happening?").
+     */
+    fun summarizeCurrentSituation(events: List<PulseEvent>): SummaryResult {
+        if (events.isEmpty()) {
+            return SummaryResult(
+                text = "There are no active person or sound events right now.",
+                averageConfidence = 1.0f,
+                isLowConfidence = false,
+                eventCount = 0,
+            )
+        }
+
+        // Get the latest active state for each person track
+        val latestByTrack = events
+            .filter { it.trackId != null && !it.trackId.startsWith("AUDIO_") }
+            .groupBy { it.trackId!! }
+            .mapValues { (_, trackEvents) -> trackEvents.maxByOrNull { it.timestamp }!! }
+            .values
+            .filter { it.eventType != EventType.PERSON_LEFT_VIEW && it.eventType != EventType.PERSON_TRACK_LOST }
+
+        val latestAudio = events
+            .filter { it.eventType == EventType.ENVIRONMENTAL_SOUND }
+            .maxByOrNull { it.timestamp }
+
+        if (latestByTrack.isEmpty()) {
+            return if (latestAudio != null) {
+                val soundName = latestAudio.description.replace("_", " ").lowercase()
+                SummaryResult(
+                    text = "No active people in view, but $soundName was recently detected nearby.",
+                    averageConfidence = latestAudio.confidence,
+                    isLowConfidence = latestAudio.confidence < LOW_CONFIDENCE_THRESHOLD,
+                    eventCount = events.size,
+                )
+            } else {
+                SummaryResult(
+                    text = "There are no active person or sound events right now.",
+                    averageConfidence = 1.0f,
+                    isLowConfidence = false,
+                    eventCount = events.size,
+                )
+            }
+        }
+
+        val avgConfidence = latestByTrack.map { it.confidence.toDouble() }.average().toFloat()
+        val isLow = avgConfidence < LOW_CONFIDENCE_THRESHOLD
+
+        if (isLow) {
+            return SummaryResult(
+                text = "Possible person activity detected nearby with low confidence.",
+                averageConfidence = avgConfidence,
+                isLowConfidence = true,
+                eventCount = events.size,
+            )
+        }
+
+        val descriptions = latestByTrack.map { event ->
+            val spatialPhrase = event.spatialPosition?.phrase ?: "nearby"
+            when (event.eventType) {
+                EventType.PERSON_APPROACHING -> "approaching $spatialPhrase"
+                EventType.PERSON_STOPPED     -> "stationary $spatialPhrase"
+                EventType.PERSON_MOVING_AWAY -> "moving away $spatialPhrase"
+                EventType.PERSON_PASSING_BY  -> "passing by $spatialPhrase"
+                EventType.PERSON_ENTERED_VIEW -> "appeared $spatialPhrase"
+                else                         -> "present $spatialPhrase"
+            }
+        }
+
+        val summaryText = when (descriptions.size) {
+            1 -> "One person is ${descriptions[0]}."
+            2 -> "Two people are nearby: one is ${descriptions[0]}, and another is ${descriptions[1]}."
+            else -> "${descriptions.size} people are currently present in your view."
         }
 
         return SummaryResult(

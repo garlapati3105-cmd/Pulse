@@ -12,6 +12,7 @@ private data class FrameSample(
     val timestampMs: Long,
     val centerX: Float,
     val centerY: Float,
+    val width: Float,
     val height: Float,
 )
 
@@ -30,11 +31,15 @@ private class TrackHistoryState(
 /**
  * Noise-robust Movement Analyzer evaluating spatial trajectories over a rolling time window,
  * fused with real-time IMU Phone Motion State.
+ *
+ * P0 Robustness: Evaluates 2D area expansion (width AND height) to distinguish actual physical
+ * approach/departure from stationary posture shifts (arm raising, crouching/standing in place).
  */
 class MovementAnalyzer(
     private val windowDurationMs: Long = 1500L,
     private val minHistoryDurationMs: Long = 400L,
-    private val heightChangeThresholdRatio: Float = 0.12f,      // 12% height change required (filters bounding box detector jitter)
+    private val heightChangeThresholdRatio: Float = 0.10f,      // 10% height change required
+    private val widthChangeThresholdRatio: Float = 0.05f,       // 5% width change required to confirm 2D proportional scaling
     private val passingByDisplacementRatio: Float = 0.06f,       // 6% screen width displacement
     private val fastApproachSpeedRatioPerSec: Float = 0.22f,     // 22% height expansion per second
 ) {
@@ -70,11 +75,17 @@ class MovementAnalyzer(
             }
 
             val box = person.boundingBox
+            val width = box.right - box.left
+            val height = box.bottom - box.top
+            val centerX = (box.left + box.right) / 2f
+            val centerY = (box.top + box.bottom) / 2f
+
             val sample = FrameSample(
                 timestampMs = timestampMs,
-                centerX = box.centerX(),
-                centerY = box.centerY(),
-                height = box.height(),
+                centerX = centerX,
+                centerY = centerY,
+                width = width,
+                height = height,
             )
 
             trackState.samples.addLast(sample)
@@ -89,6 +100,7 @@ class MovementAnalyzer(
             val (rawCandidate, rawConfidence, isFast) = classifyTrajectory(
                 samples = trackState.samples,
                 imageWidth = imageWidth,
+                imageHeight = imageHeight,
             )
 
             trackState.isFastApproach = isFast
@@ -141,8 +153,9 @@ class MovementAnalyzer(
     private fun classifyTrajectory(
         samples: ArrayDeque<FrameSample>,
         imageWidth: Int,
+        imageHeight: Int,
     ): Triple<MovementType, Float, Boolean> {
-        if ((samples.size < 5) || (imageWidth <= 0)) {
+        if ((samples.size < 5) || (imageWidth <= 0) || (imageHeight <= 0)) {
             return Triple(MovementType.UNKNOWN, 0.5f, false)
         }
 
@@ -168,15 +181,19 @@ class MovementAnalyzer(
         val avgHeightOld = earliestSamples.map { it.height.toDouble() }.average().toFloat()
         val avgHeightNew = latestSamples.map { it.height.toDouble() }.average().toFloat()
 
+        val avgWidthOld = earliestSamples.map { it.width.toDouble() }.average().toFloat()
+        val avgWidthNew = latestSamples.map { it.width.toDouble() }.average().toFloat()
+
         val avgXOld = earliestSamples.map { it.centerX.toDouble() }.average().toFloat()
         val avgXNew = latestSamples.map { it.centerX.toDouble() }.average().toFloat()
 
-        if (avgHeightOld <= 0f) {
+        if (avgHeightOld <= 0f || avgWidthOld <= 0f) {
             return Triple(MovementType.UNKNOWN, 0.5f, false)
         }
 
-        // Feature 1: Relative height change ratio
+        // Feature 1: Relative height & width change ratios
         val relHeightChange = (avgHeightNew - avgHeightOld) / avgHeightOld
+        val relWidthChange = (avgWidthNew - avgWidthOld) / avgWidthOld
 
         // Feature 2: Relative lateral X displacement ratio
         val relXDisplacement = abs(avgXNew - avgXOld) / imageWidth.toFloat()
@@ -185,6 +202,11 @@ class MovementAnalyzer(
         val timeDeltaSec = timeSpanMs / 1000f
         val heightGrowthRatePerSec = if (timeDeltaSec > 0f) relHeightChange / timeDeltaSec else 0f
         val isFastApproach = heightGrowthRatePerSec >= fastApproachSpeedRatioPerSec
+
+        // Feature 4: Detect posture changes (arm raising increases height without expanding width;
+        // crouching shrinks height without shrinking width)
+        val isProportionalScaling = relHeightChange > 0f && relWidthChange >= widthChangeThresholdRatio
+        val isProportionalShrinking = relHeightChange < 0f && relWidthChange <= -widthChangeThresholdRatio
 
         val candidate: MovementType
         val confidence: Float
@@ -196,20 +218,22 @@ class MovementAnalyzer(
                 confidence = (relXDisplacement / passingByDisplacementRatio).coerceIn(0.75f, 0.99f)
             }
 
-            // APPROACHING: Height expanding >= 12%
-            relHeightChange >= heightChangeThresholdRatio -> {
+            // APPROACHING: Requires BOTH height expansion AND width expansion (proportional 2D scale)
+            relHeightChange >= heightChangeThresholdRatio && isProportionalScaling -> {
                 candidate = MovementType.PERSON_APPROACHING
                 confidence = (relHeightChange / heightChangeThresholdRatio).coerceIn(0.75f, 0.99f)
             }
 
-            // MOVING_AWAY: Height shrinking <= -12%
-            relHeightChange <= -heightChangeThresholdRatio -> {
+            // MOVING_AWAY: Requires BOTH height shrinkage AND width shrinkage
+            relHeightChange <= -heightChangeThresholdRatio && isProportionalShrinking -> {
                 candidate = MovementType.PERSON_MOVING_AWAY
                 confidence = (abs(relHeightChange) / heightChangeThresholdRatio).coerceIn(0.75f, 0.99f)
             }
 
-            // STATIONARY: Height change < 7.8% and displacement < 4.8%
-            ((abs(relHeightChange) < (heightChangeThresholdRatio * 0.65f)) && (relXDisplacement < (passingByDisplacementRatio * 0.80f))) -> {
+            // POSTURE CHANGE or STATIONARY: Height change without matching width change (e.g. raising arms, crouching)
+            // or small overall displacement -> Classify as STATIONARY
+            (abs(relHeightChange) < heightChangeThresholdRatio * 0.8f || !isProportionalScaling) &&
+                    (relXDisplacement < passingByDisplacementRatio * 0.80f) -> {
                 candidate = MovementType.STATIONARY
                 confidence = 0.90f
             }
