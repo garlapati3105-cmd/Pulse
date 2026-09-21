@@ -36,13 +36,15 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.saikiran.pulse.audio.TtsManager
-import com.saikiran.pulse.audio.voice.CommandParser
 import com.saikiran.pulse.audio.voice.VoiceCommand
 import com.saikiran.pulse.audio.voice.VoiceCommandManager
 import com.saikiran.pulse.audio.voice.VoiceCommandState
 import com.saikiran.pulse.engine.alerts.ProactiveAlertCoordinator
+import com.saikiran.pulse.engine.evidence.AudioEventState
+import com.saikiran.pulse.engine.evidence.PersonState
+import com.saikiran.pulse.engine.evidence.SituationState
 import com.saikiran.pulse.engine.priority.PriorityLevel
-import com.saikiran.pulse.engine.summary.EventSummarizer
+import com.saikiran.pulse.engine.reasoning.LocalAiReasoner
 import com.saikiran.pulse.engine.summary.SummaryResult
 import com.saikiran.pulse.perception.audio.AudioPerceptionManager
 import com.saikiran.pulse.perception.audio.AudioPerceptionState
@@ -80,6 +82,9 @@ fun CameraScreen(
     // On-Device Voice Command Manager (Milestone 7C)
     val voiceCommandManager = remember { VoiceCommandManager(context) }
 
+    // Local AI Reasoning Layer (Phase 9)
+    val localAiReasoner = remember { LocalAiReasoner() }
+
     // Proactive Alert Coordinator (Milestone 6B) - Defaults to ON for testing
     val proactiveAlertCoordinator = remember { ProactiveAlertCoordinator(ttsManager) }
     var isProactiveVoiceEnabled by remember { mutableStateOf(true) } // Default ON for testing
@@ -108,7 +113,6 @@ fun CameraScreen(
                 }
             }
         )
-        // NOTE: .also { it.setup() } deliberately removed — see PersonAnalyzer
     }
 
     // Connect proactive alert coordinator to temporal event store
@@ -162,24 +166,51 @@ fun CameraScreen(
     val voiceStatusMessage by voiceCommandManager.statusMessageFlow.collectAsStateWithLifecycle()
     val lastCommand by voiceCommandManager.lastCommandFlow.collectAsStateWithLifecycle()
 
+    // Helper to build structured SituationState for Local AI Reasoning Layer
+    val buildSituationState: () -> SituationState = {
+        val audioList = latestAudioEvent?.let { audio ->
+            listOf(AudioEventState(audio.soundType, audio.label, audio.confidence, audio.timestamp))
+        } ?: emptyList()
+
+        SituationState(
+            timestampMs = System.currentTimeMillis(),
+            activePeople = emptyList(), // Filled dynamically if tracks are active
+            environmentalEvents = audioList,
+            recentEvents = events,
+            sensorState = sensorMotionMonitor.currentMotionState,
+            overallConfidence = 1.0f,
+        )
+    }
+
     // Deterministic Voice Command Execution Function
     val executeVoiceCommand: (String, VoiceCommand) -> Unit = remember(events) {
         { text, command ->
             when (command) {
                 VoiceCommand.SHOW_CURRENT_SITUATION -> {
-                    val summary = EventSummarizer.summarizeCurrentSituation(events)
+                    val situation = buildSituationState()
+                    val result = localAiReasoner.summarizeSituation(situation)
                     currentSummaryTitle = "Current Situation"
-                    currentSummaryResult = summary
+                    currentSummaryResult = SummaryResult(
+                        text = result.text,
+                        averageConfidence = result.confidence,
+                        isLowConfidence = result.isLowConfidence,
+                        eventCount = events.size,
+                    )
                     showSummaryDialog = true
-                    ttsManager.speak(summary.text)
+                    ttsManager.speak(result.text)
                 }
 
                 VoiceCommand.SHOW_RECENT_EVENT_SUMMARY -> {
-                    val summary = EventSummarizer.summarize(events)
+                    val result = localAiReasoner.summarizeRecentEvents(events)
                     currentSummaryTitle = "What Just Happened?"
-                    currentSummaryResult = summary
+                    currentSummaryResult = SummaryResult(
+                        text = result.text,
+                        averageConfidence = result.confidence,
+                        isLowConfidence = result.isLowConfidence,
+                        eventCount = events.size,
+                    )
                     showSummaryDialog = true
-                    ttsManager.speak(summary.text)
+                    ttsManager.speak(result.text)
                 }
 
                 VoiceCommand.SHOW_CHANGES -> {
@@ -250,11 +281,16 @@ fun CameraScreen(
         onRegisterVolumeKeyHandlers?.invoke(
             {
                 // Volume Up -> "WHAT JUST HAPPENED?"
-                val summary = EventSummarizer.summarize(events)
+                val result = localAiReasoner.summarizeRecentEvents(events)
                 currentSummaryTitle = "What Just Happened?"
-                currentSummaryResult = summary
+                currentSummaryResult = SummaryResult(
+                    text = result.text,
+                    averageConfidence = result.confidence,
+                    isLowConfidence = result.isLowConfidence,
+                    eventCount = events.size,
+                )
                 showSummaryDialog = true
-                ttsManager.speak(summary.text)
+                ttsManager.speak(result.text)
             },
             {
                 // Volume Down -> "WHAT CHANGED?"
@@ -340,7 +376,7 @@ fun CameraScreen(
             }
         )
 
-        // ── Priority Engine & Proactive Alert Debug Panel (Milestones 6A, 6B, 7A, 7B, 7C) ─
+        // ── Priority Engine & Proactive Alert Debug Panel (Milestones 6A, 6B, 7A, 7B, 7C, Phase 9) ─
         Column(
             modifier = Modifier
                 .align(Alignment.TopStart)
@@ -521,7 +557,7 @@ fun CameraScreen(
                 }
             }
 
-            // ── Explicit Voice Command Debug Panel (Milestone 7C) ───────────
+            // ── Local AI Reasoning Debug Panel (Phase 9) ───────────────────
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -530,45 +566,18 @@ fun CameraScreen(
             ) {
                 Column {
                     Text(
-                        text = "── Explicit Voice Commands (7C) ──",
-                        color = Color(0xFFAB47BC),
+                        text = "── Local AI Reasoning (Phase 9) ──",
+                        color = Color(0xFFFFD54F), // Amber
                         style = MaterialTheme.typography.labelSmall,
                         fontWeight = FontWeight.Bold,
                     )
                     Text(
-                        text = "State: $voiceCommandState",
-                        color = when (voiceCommandState) {
-                            VoiceCommandState.LISTENING -> Color(0xFFFF5252)
-                            VoiceCommandState.PROCESSING -> Color(0xFFFFB74D)
-                            VoiceCommandState.RESULT -> Color(0xFF00E676)
-                            else -> Color.LightGray
-                        },
-                        style = MaterialTheme.typography.bodySmall,
-                        fontWeight = FontWeight.Bold,
-                    )
-                    Text(
-                        text = "On-Device: ${if (voiceCommandManager.isOnDeviceAvailable) "AVAILABLE" else "UNAVAILABLE"}",
-                        color = if (voiceCommandManager.isOnDeviceAvailable) Color(0xFF00E676) else Color(0xFFFFB74D),
+                        text = "Engine: LocalAiReasoner (Deterministic Base)",
+                        color = Color(0xFF00E676),
                         style = MaterialTheme.typography.labelSmall,
                     )
-                    if (recognizedText.isNotBlank()) {
-                        Text(
-                            text = "Recognized: \"$recognizedText\"",
-                            color = Color.White,
-                            style = MaterialTheme.typography.bodySmall,
-                            fontWeight = FontWeight.Bold,
-                        )
-                    }
-                    lastCommand?.let { cmd ->
-                        Text(
-                            text = "Command: $cmd",
-                            color = Color(0xFF00E676),
-                            style = MaterialTheme.typography.bodySmall,
-                            fontWeight = FontWeight.Bold,
-                        )
-                    }
                     Text(
-                        text = voiceStatusMessage,
+                        text = "Contract: SituationState (JSON/Text)",
                         color = Color.LightGray,
                         style = MaterialTheme.typography.labelSmall,
                     )
@@ -650,11 +659,16 @@ fun CameraScreen(
 
             Button(
                 onClick = {
-                    val summary = EventSummarizer.summarize(events)
+                    val result = localAiReasoner.summarizeRecentEvents(events)
                     currentSummaryTitle = "What Just Happened?"
-                    currentSummaryResult = summary
+                    currentSummaryResult = SummaryResult(
+                        text = result.text,
+                        averageConfidence = result.confidence,
+                        isLowConfidence = result.isLowConfidence,
+                        eventCount = events.size,
+                    )
                     showSummaryDialog = true
-                    ttsManager.speak(summary.text)
+                    ttsManager.speak(result.text)
                 },
                 colors = ButtonDefaults.buttonColors(
                     containerColor = Color(0xFF00E676),
