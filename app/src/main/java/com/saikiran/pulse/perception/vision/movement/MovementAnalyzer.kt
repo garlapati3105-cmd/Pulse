@@ -34,9 +34,9 @@ private class TrackHistoryState(
 class MovementAnalyzer(
     private val windowDurationMs: Long = 1500L,
     private val minHistoryDurationMs: Long = 400L,
-    private val heightChangeThresholdRatio: Float = 0.05f,      // 5% height change over segment centers
-    private val passingByDisplacementRatio: Float = 0.08f,       // 8% screen width displacement
-    private val fastApproachSpeedRatioPerSec: Float = 0.18f,     // 18% height expansion per second
+    private val heightChangeThresholdRatio: Float = 0.12f,      // 12% height change required (filters bounding box detector jitter)
+    private val passingByDisplacementRatio: Float = 0.06f,       // 6% screen width displacement
+    private val fastApproachSpeedRatioPerSec: Float = 0.22f,     // 22% height expansion per second
 ) {
     private val historyMap = mutableMapOf<String, TrackHistoryState>()
 
@@ -113,9 +113,9 @@ class MovementAnalyzer(
                     }
                 }
 
-                // Transition stable state if winning candidate reaches threshold (>= 4 votes)
+                // Transition stable state if winning candidate reaches threshold (>= 6 votes ~ 3-4 consecutive frames)
                 val leadingVote = trackState.typeVotes.maxByOrNull { it.value }
-                if ((leadingVote != null) && (leadingVote.value >= 4)) {
+                if ((leadingVote != null) && (leadingVote.value >= 6)) {
                     trackState.currentStableType = leadingVote.key
                 }
             } else {
@@ -190,26 +190,26 @@ class MovementAnalyzer(
         val confidence: Float
 
         when {
-            // PASSING_BY: Horizontal displacement across screen >= 8%, height relatively constant
-            (relXDisplacement >= passingByDisplacementRatio) && (abs(relHeightChange) < 0.12f) -> {
+            // PASSING_BY: Horizontal displacement across screen >= 6%, height relatively constant
+            (relXDisplacement >= passingByDisplacementRatio) && (abs(relHeightChange) < heightChangeThresholdRatio) -> {
                 candidate = MovementType.PERSON_PASSING_BY
                 confidence = (relXDisplacement / passingByDisplacementRatio).coerceIn(0.75f, 0.99f)
             }
 
-            // APPROACHING: Height expanding >= 5%
+            // APPROACHING: Height expanding >= 12%
             relHeightChange >= heightChangeThresholdRatio -> {
                 candidate = MovementType.PERSON_APPROACHING
                 confidence = (relHeightChange / heightChangeThresholdRatio).coerceIn(0.75f, 0.99f)
             }
 
-            // MOVING_AWAY: Height shrinking <= -5%
+            // MOVING_AWAY: Height shrinking <= -12%
             relHeightChange <= -heightChangeThresholdRatio -> {
                 candidate = MovementType.PERSON_MOVING_AWAY
                 confidence = (abs(relHeightChange) / heightChangeThresholdRatio).coerceIn(0.75f, 0.99f)
             }
 
-            // STATIONARY: Both height change and displacement are small
-            abs(relHeightChange) < heightChangeThresholdRatio * 0.6f && relXDisplacement < passingByDisplacementRatio * 0.6f -> {
+            // STATIONARY: Height change < 7.8% and displacement < 4.8%
+            ((abs(relHeightChange) < (heightChangeThresholdRatio * 0.65f)) && (relXDisplacement < (passingByDisplacementRatio * 0.80f))) -> {
                 candidate = MovementType.STATIONARY
                 confidence = 0.90f
             }

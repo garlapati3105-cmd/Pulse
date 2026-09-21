@@ -36,6 +36,10 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.saikiran.pulse.audio.TtsManager
+import com.saikiran.pulse.audio.voice.CommandParser
+import com.saikiran.pulse.audio.voice.VoiceCommand
+import com.saikiran.pulse.audio.voice.VoiceCommandManager
+import com.saikiran.pulse.audio.voice.VoiceCommandState
 import com.saikiran.pulse.engine.alerts.ProactiveAlertCoordinator
 import com.saikiran.pulse.engine.priority.PriorityLevel
 import com.saikiran.pulse.engine.summary.EventSummarizer
@@ -72,6 +76,9 @@ fun CameraScreen(
 
     // Native TextToSpeech manager for spoken natural language summaries
     val ttsManager = remember { TtsManager(context) }
+
+    // On-Device Voice Command Manager (Milestone 7C)
+    val voiceCommandManager = remember { VoiceCommandManager(context) }
 
     // Proactive Alert Coordinator (Milestone 6B) - Defaults to ON for testing
     val proactiveAlertCoordinator = remember { ProactiveAlertCoordinator(ttsManager) }
@@ -145,9 +152,102 @@ fun CameraScreen(
             personDetector.fusionEngine.onAudioEvent(audioEvent)
         }
     }
-    
+
     // Lifecycle-aware collection of Fused Events (Milestone 7B)
     val latestFusedEvent by personDetector.fusionEngine.latestFusedEventFlow.collectAsStateWithLifecycle()
+
+    // Lifecycle-aware collection of Explicit Voice Command States (Milestone 7C)
+    val voiceCommandState by voiceCommandManager.stateFlow.collectAsStateWithLifecycle()
+    val recognizedText by voiceCommandManager.recognizedTextFlow.collectAsStateWithLifecycle()
+    val voiceStatusMessage by voiceCommandManager.statusMessageFlow.collectAsStateWithLifecycle()
+    val lastCommand by voiceCommandManager.lastCommandFlow.collectAsStateWithLifecycle()
+
+    // Deterministic Voice Command Execution Function
+    val executeVoiceCommand: (String, VoiceCommand) -> Unit = remember(events) {
+        { text, command ->
+            when (command) {
+                VoiceCommand.SHOW_CURRENT_SITUATION -> {
+                    currentSummaryTitle = "Current Situation"
+                    currentSummaryResult = SummaryResult(
+                        text = "Current situation requested: Monitoring active scene.",
+                        averageConfidence = 1.0f,
+                        isLowConfidence = false,
+                        eventCount = events.size,
+                    )
+                    showSummaryDialog = true
+                    ttsManager.speak("Current situation requested.")
+                }
+
+                VoiceCommand.SHOW_RECENT_EVENT_SUMMARY -> {
+                    val summary = EventSummarizer.summarize(events)
+                    currentSummaryTitle = "What Just Happened?"
+                    currentSummaryResult = summary
+                    showSummaryDialog = true
+                    ttsManager.speak(summary.text)
+                }
+
+                VoiceCommand.SHOW_CHANGES -> {
+                    val changeSummary = personDetector.eventStore.changeDetector.getRecentChangesAndConsume()
+                    currentSummaryTitle = "What Changed?"
+                    currentSummaryResult = changeSummary
+                    showSummaryDialog = true
+                    ttsManager.speak(changeSummary.text)
+                }
+
+                VoiceCommand.REPEAT_LAST_RESPONSE -> {
+                    currentSummaryResult?.let {
+                        ttsManager.speak(it.text)
+                    } ?: run {
+                        ttsManager.speak("No recent response to repeat.")
+                    }
+                }
+
+                VoiceCommand.MUTE_PROACTIVE_VOICE -> {
+                    isMuted = true
+                    proactiveAlertCoordinator.isMuted = true
+                    ttsManager.speak("Proactive voice muted.")
+                }
+
+                VoiceCommand.UNMUTE_PROACTIVE_VOICE -> {
+                    isMuted = false
+                    proactiveAlertCoordinator.isMuted = false
+                    ttsManager.speak("Proactive voice unmuted.")
+                }
+
+                VoiceCommand.UNKNOWN -> {
+                    val errorMsg = "I didn't understand that command."
+                    currentSummaryTitle = "Voice Command"
+                    currentSummaryResult = SummaryResult(
+                        text = "$errorMsg (Recognized: \"$text\")",
+                        averageConfidence = 0.0f,
+                        isLowConfidence = true,
+                        eventCount = 0,
+                    )
+                    showSummaryDialog = true
+                    ttsManager.speak(errorMsg)
+                }
+            }
+        }
+    }
+
+    // Helper to start Voice Input with Microphone Access Coordination
+    val triggerVoiceInput: () -> Unit = {
+        voiceCommandManager.startListening(
+            onListeningStarted = {
+                // Pause environmental audio perception while voice input is listening
+                audioPerceptionManager.stop()
+            },
+            onListeningEnded = {
+                // Restore environmental audio perception
+                if (hasAudioPermission) {
+                    audioPerceptionManager.start()
+                }
+            },
+            onCommandExecuted = { text, command ->
+                executeVoiceCommand(text, command)
+            }
+        )
+    }
 
     // Register volume hardware key handlers for hands-free queries (Priority P2)
     LaunchedEffect(events) {
@@ -177,6 +277,7 @@ fun CameraScreen(
             sensorMotionMonitor.stop()
             personDetector.close()
             ttsManager.shutdown()
+            voiceCommandManager.destroy()
             analysisExecutor.shutdown()
         }
     }
@@ -243,7 +344,7 @@ fun CameraScreen(
             }
         )
 
-        // ── Priority Engine & Proactive Alert Debug Panel (Milestones 6A & 6B) ─
+        // ── Priority Engine & Proactive Alert Debug Panel (Milestones 6A, 6B, 7A, 7B, 7C) ─
         Column(
             modifier = Modifier
                 .align(Alignment.TopStart)
@@ -368,7 +469,7 @@ fun CameraScreen(
                     )
                 }
             }
-            
+
             // ── Sensor Fusion Engine Debug Panel (Milestone 7B) ─────────────
             latestFusedEvent?.let { fused ->
                 Box(
@@ -380,7 +481,7 @@ fun CameraScreen(
                     Column {
                         Text(
                             text = "── Sensor Fusion Engine (7B) ──",
-                            color = Color(0xFFE040FB), // Purple
+                            color = Color(0xFFE040FB),
                             style = MaterialTheme.typography.labelSmall,
                             fontWeight = FontWeight.Bold,
                         )
@@ -421,6 +522,60 @@ fun CameraScreen(
                             style = MaterialTheme.typography.labelSmall,
                         )
                     }
+                }
+            }
+
+            // ── Explicit Voice Command Debug Panel (Milestone 7C) ───────────
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(Color.Black.copy(alpha = 0.75f))
+                    .padding(10.dp)
+            ) {
+                Column {
+                    Text(
+                        text = "── Explicit Voice Commands (7C) ──",
+                        color = Color(0xFFAB47BC),
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    Text(
+                        text = "State: $voiceCommandState",
+                        color = when (voiceCommandState) {
+                            VoiceCommandState.LISTENING -> Color(0xFFFF5252)
+                            VoiceCommandState.PROCESSING -> Color(0xFFFFB74D)
+                            VoiceCommandState.RESULT -> Color(0xFF00E676)
+                            else -> Color.LightGray
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    Text(
+                        text = "On-Device: ${if (voiceCommandManager.isOnDeviceAvailable) "AVAILABLE" else "UNAVAILABLE"}",
+                        color = if (voiceCommandManager.isOnDeviceAvailable) Color(0xFF00E676) else Color(0xFFFFB74D),
+                        style = MaterialTheme.typography.labelSmall,
+                    )
+                    if (recognizedText.isNotBlank()) {
+                        Text(
+                            text = "Recognized: \"$recognizedText\"",
+                            color = Color.White,
+                            style = MaterialTheme.typography.bodySmall,
+                            fontWeight = FontWeight.Bold,
+                        )
+                    }
+                    lastCommand?.let { cmd ->
+                        Text(
+                            text = "Command: $cmd",
+                            color = Color(0xFF00E676),
+                            style = MaterialTheme.typography.bodySmall,
+                            fontWeight = FontWeight.Bold,
+                        )
+                    }
+                    Text(
+                        text = voiceStatusMessage,
+                        color = Color.LightGray,
+                        style = MaterialTheme.typography.labelSmall,
+                    )
                 }
             }
         }
@@ -466,7 +621,7 @@ fun CameraScreen(
             }
         }
 
-        // ── Action Buttons ("WHAT JUST HAPPENED?" & "WHAT CHANGED?") ──────────
+        // ── Action Buttons ("WHAT JUST HAPPENED?", "WHAT CHANGED?", 🎙️ VOICE) ──
         Column(
             modifier = Modifier
                 .align(Alignment.BottomEnd)
@@ -474,6 +629,29 @@ fun CameraScreen(
             verticalArrangement = Arrangement.spacedBy(8.dp),
             horizontalAlignment = Alignment.End,
         ) {
+            Button(
+                onClick = {
+                    triggerVoiceInput()
+                },
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = when (voiceCommandState) {
+                        VoiceCommandState.LISTENING -> Color(0xFFFF5252)
+                        VoiceCommandState.PROCESSING -> Color(0xFFFFB74D)
+                        else -> Color(0xFFAB47BC)
+                    },
+                    contentColor = Color.White,
+                ),
+            ) {
+                Text(
+                    text = when (voiceCommandState) {
+                        VoiceCommandState.LISTENING -> "🎙️ LISTENING..."
+                        VoiceCommandState.PROCESSING -> "🎙️ PROCESSING..."
+                        else -> "🎙️ VOICE COMMAND"
+                    },
+                    fontWeight = FontWeight.Bold,
+                )
+            }
+
             Button(
                 onClick = {
                     val summary = EventSummarizer.summarize(events)
