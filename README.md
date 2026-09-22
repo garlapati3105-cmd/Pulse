@@ -1,6 +1,6 @@
 # Pulse 👁️🎙️📱
 
-> **On-Device Spatial Perception, Temporal Event Memory & Proactive Multimodal Intelligence Engine for Wearable Smart Glasses on Android.**
+> **On-Device Spatial Perception, Situational Intelligence, Local AI Reasoning & Proactive Multimodal Engine for Wearable Smart Glasses & Smartphones.**
 
 [![Kotlin](https://img.shields.io/badge/Kotlin-2.2.10-7F52FF?style=flat-square&logo=kotlin)](https://kotlinlang.org/)
 [![Android SDK](https://img.shields.io/badge/Android%20SDK-26%2B-3DDC84?style=flat-square&logo=android)](https://developer.android.com/)
@@ -8,45 +8,61 @@
 [![MediaPipe](https://img.shields.io/badge/MediaPipe-0.10.14-00E676?style=flat-square)](https://developers.google.com/mediapipe)
 [![TensorFlow Lite](https://img.shields.io/badge/TensorFlow%20Lite-YAMNet-FF6F00?style=flat-square&logo=tensorflow)](https://www.tensorflow.org/lite)
 
-Pulse is a real-world, privacy-first, on-device multimodal perception engine designed for wearable smart camera glasses and assistive vision devices on Android. Operating completely offline without cloud AI latency or bandwidth dependencies, Pulse continuously converts raw camera frames, microphone streams, and phone IMU motion sensors into structured spatial memory, deterministic priority decisions, and proactive natural language speech output.
+Pulse is an offline, privacy-first, on-device multimodal perception and situational intelligence engine designed for wearable camera glasses and smart assistive devices on Android. Operating 100% locally without cloud AI latency or network dependencies, Pulse fuses real-time camera frames, microphone audio streams, and phone IMU motion sensors into structured spatial memory, evolving situational lifecycles, local AI reasoning, tactile haptic pulses, and proactive natural language speech output.
 
 ---
 
 ## 🌟 Key Capabilities
 
 ### 👁️ On-Device Vision Perception Pipeline
-* **High-Efficiency Person Detection:** Uses MediaPipe Tasks Vision with `efficientdet_lite0.tflite` configured via CPU delegate and C++ category allowlisting. Optimized threshold (`0.25f`) enables high-sensitivity detection of full bodies, upper bodies, close-ups, and side profiles.
-* **Temporal Tracking & Smart Re-ID:** Lightweight IoU + Centroid Distance tracker (`PersonTracker`) with Exponential Moving Average (EMA) box smoothing. Features a **3-second short-term Re-ID memory** to maintain subject identities (`PERSON_1`) across brief occlusions or frame exits.
-* **25% Segment Trajectory Classification:** Classifies movement trajectories into `APPROACHING`, `STOPPED`, `MOVING_AWAY`, `PASSING_BY`, or `STATIONARY` using segment-endpoint height expansion and vector analysis.
-* **Approach Speed & Urgency Detection:** Calculates height expansion rate ($\Delta Height / dt \ge 18\%/\text{s}$) to flag fast approaches for high-urgency alerts (*"Warning! Someone is approaching quickly on your left"*).
+* **High-Sensitivity Person Detection:** Uses MediaPipe Tasks Vision with `efficientdet_lite0.tflite` configured via CPU delegate and C++ category allowlisting. Threshold (`0.25f`) enables high-sensitivity detection of full bodies, upper bodies, close-ups, and side profiles.
+* **Cost-Matrix Tracking & Smart Re-ID:** Unified cost-matrix tracker (`PersonTracker`) evaluating $Cost = (1 - IoU) \times 0.6 + DistRatio \times 0.4$ to prevent ID swapping when subjects cross paths. Features a **3-second short-term Re-ID memory** to maintain subject identities across brief occlusions.
+* **2D Proportional Scale Trajectory Analysis:** `MovementAnalyzer` evaluates 2D area expansion (width AND height) over a 1.5s rolling window. Distinguishes actual physical approach ($\ge 10\%$ width & height growth) from stationary posture shifts (arm raising, crouching/standing in place) to eliminate false approach alerts.
 
-### 🧭 Spatial Positioning & Distance Awareness
+### 🧭 Spatial Positioning & Proximity Awareness
 * **Horizontal FOV Zones:** Divides 2D camera space into `LEFT` ($X < 35\%$), `CENTER` ($35\%\text{--}65\%$), and `RIGHT` ($X > 65\%$).
 * **Distance Region Mapping:** Classifies relative distance into `NEAR` ($Height \ge 40\%$), `MID` ($20\%\text{--}40\%$), and `FAR` ($Height < 20\%$).
-* **Natural Spatial Language:** Combines spatial attributes into natural English phrases (e.g. *"on your left nearby"*, *"in front of you"*).
+* **Natural Spatial Phrasing:** Formulates idiomatic spatial phrases (e.g. *"on your left nearby"*, *"in front of you"*).
 
 ### 📱 IMU Motion Fusion & Camera Shake Suppression
 * **Sensor Motion Monitoring:** Monitors phone Gyroscope ($\ge 0.45\text{ rad/s}$) and Linear Acceleration ($\ge 1.20\text{ m/s}^2$) at ~50 Hz.
-* **Camera Shake Penalty:** Fuses `CAMERA_STABLE` vs `CAMERA_MOVING` states to penalize vision confidence during phone camera movement, eliminating false positive motion events.
+* **Camera Shake Penalty:** Fuses `CAMERA_STABLE` vs `CAMERA_MOVING` states to heavily penalize vision confidence ($-0.40f$) during phone camera movement, eliminating camera-shake false positives.
 
 ### 🎙️ On-Device Environmental Audio Perception (YAMNet)
-* **16kHz Micro-Latency Audio Capture:** Captures audio off the UI thread via Android `AudioRecord` at 16kHz mono (YAMNet native format).
+* **16kHz Micro-Latency Audio Capture:** Captures audio off the UI thread via Android `AudioRecord` at 16kHz mono.
 * **Sound Classification:** Runs TensorFlow Lite `AudioClassifier` (`yamnet.tflite`) detecting 8 key categories: `SPEECH`, `FOOTSTEPS`, `VEHICLE`, `VEHICLE_HORN`, `DOOR`, `DOORBELL`, `ALARM`, `SIREN`.
 * **Temporal Debouncing:** Requires sound probability to persist across 3 consecutive 100ms audio windows (~300ms) before emitting a debounced `AudioEvent`.
 
-### 🧠 Temporal Memory & Deterministic Priority Engine
-* **Thread-Safe Rolling Event Store:** Retains chronological events in a synchronized 20-second rolling window (`TemporalEventStore`).
-* **Semantic State Machine:** Suppresses duplicate frame observations and emits clean transition events (`PERSON_ENTERED_VIEW`, `PERSON_TRACK_LOST`, `PERSON_LEFT_VIEW`).
-* **Priority Engine (0–100 Scoring):** Deterministically scores events based on base semantics, spatial proximity, speed, confidence, and motion penalties to compute `LOW`, `MEDIUM`, or `HIGH` priority levels.
-* **Proactive Voice Alerts:** `ProactiveAlertCoordinator` automatically speaks `HIGH` priority spatial alerts (*"Someone is approaching from your left"*) with a 6-second deduplication cooldown and score-based interruption policy.
+### ⚡ Deterministic Sensor Fusion Engine
+* **Multimodal Evidence Correlation (`SensorFusionEngine`):** Fuses Vision, Audio, and IMU observations across a 2-second temporal overlapping window.
+* **Safety & Provenance Rules:**
+  * **Approach + Footsteps + Stable Camera:** Boosts confidence conservatively (capped at `0.92f`).
+  * **Vehicle Horn + Person:** Preserved as `AUDIO` source without falsely claiming the vehicle itself is visible.
+  * **Audio-Alone Safety:** Audio events never invent visual person tracks.
+  * **Audio-Silence Safety:** Lack of audio does not invalidate visual detection.
 
-### 🔊 Accessibility & Hands-Free Interaction
-* **Natural Language Queries:**
-  * **"WHAT JUST HAPPENED?"**: Summarizes the entire 20-second rolling event memory into 1–2 idiomatic English sentences.
-  * **"WHAT CHANGED?"**: Drains and summarizes unconsumed state deltas since the user's last check.
-* **Hardware Volume Key Shortcuts:** Single-click Volume Up (*"What Just Happened?"*) and Volume Down (*"What Changed?"*).
-* **UI Controls:** `PROACTIVE VOICE: ON/OFF` and `MUTE: ON/OFF` header toggles.
-* **Developer Debug Panels:** Real-time on-screen telemetry for Vision Overlay, Priority Decisions, Proactive Audits, and Audio Perception.
+### 🧠 Situational Intelligence & Lifecycles
+* **Evolving Situation Lifecycles:** `SituationTracker` correlates events over time into coherent, evolving situations (`STARTED` $\rightarrow$ `ESCALATING` $\rightarrow$ `ACTIVE` $\rightarrow$ `CHANGED` $\rightarrow$ `DE_ESCALATING` $\rightarrow$ `RESOLVED`).
+* **Over-Announce Suppression:** Prevents repetitive speech unless situation importance changes, state transitions, or a new piece of evidence arrives.
+
+### 🤖 Local AI Reasoning Layer
+* **Structured Evidence Contract (`SituationState`):** Serializes active tracks, environmental sounds, recent events, and sensor states into a compact prompt contract consumed by `LocalAiReasoner`.
+* **Anti-Hallucination Policy:** Grounded strictly in observed evidence. Never invents non-observed subjects, sounds, or actions. On local exception or unavailability, delegates seamlessly to `DeterministicReasoningEngine`.
+
+### 🎙️ On-Device Explicit Voice Commands
+* **Local-Only Speech Recognition:** Uses Android's native `SpeechRecognizer.createOnDeviceSpeechRecognizer` (`EXTRA_PREFER_OFFLINE = true`) without cloud fallback.
+* **Deterministic Command Parser:** Maps spoken queries to core actions:
+  * *"What's happening?"* / *"Is someone approaching?"* $\rightarrow$ `SHOW_CURRENT_SITUATION`
+  * *"What just happened?"* $\rightarrow$ `SHOW_RECENT_EVENT_SUMMARY`
+  * *"What changed?"* $\rightarrow$ `SHOW_CHANGES`
+  * *"Repeat that"* $\rightarrow$ `REPEAT_LAST_RESPONSE`
+  * *"Mute"* / *"Unmute"* $\rightarrow$ `MUTE_PROACTIVE_VOICE` / `UNMUTE_PROACTIVE_VOICE`
+* **Microphone Coordination:** Pauses environmental audio perception during active voice input and restores it automatically on completion.
+
+### 🔔 Priority Engine, Proactive Speech & Haptics
+* **Deterministic Scoring (0–100):** Scores events based on semantics, proximity, speed, confidence, and motion penalties into `LOW`, `MEDIUM`, and `HIGH` priority levels.
+* **Proactive Speech Gating:** `ProactiveAlertCoordinator` speaks `HIGH` priority alerts automatically with a 6-second cooldown and score-based interruption policy.
+* **Tactile Haptic Feedback Channel:** `HapticFeedbackManager` delivers distinct tactile vibration patterns (`LOW` click, `MEDIUM` double pulse, `HIGH` urgent triple pulse) using standard public Android Vibrator APIs.
 
 ---
 
@@ -61,38 +77,45 @@ flowchart TD
     end
 
     subgraph Perception_Layer["Perception Layer"]
-        VD["PersonDetector\n(EfficientDet-Lite0)"]
-        TR["PersonTracker\n(IoU + Re-ID Memory)"]
-        MA["MovementAnalyzer\n(25% Segment Trajectory)"]
+        VD["PersonDetector\n(EfficientDet-Lite0 @ 0.25f)"]
+        TR["PersonTracker\n(Cost-Matrix + Re-ID Memory)"]
+        MA["MovementAnalyzer\n(2D Proportional Scale)"]
         AC["AudioPerceptionManager\n(TFLite YAMNet)"]
-        SM["SensorMotionMonitor\n(Motion Fusion)"]
+        SM["SensorMotionMonitor\n(IMU Shake Penalty)"]
+        DEV["DeviceCapabilityManager\n(Hardware Discovery)"]
     end
 
-    subgraph Memory_Engine["Temporal Memory & Priority Engine"]
-        ES["TemporalEventStore\n(Rolling 20s Window)"]
-        SP["SemanticEventProcessor\n(Deduplication)"]
-        CD["ChangeDetector\n(Unconsumed Deltas)"]
+    subgraph Fusion_And_Intelligence["Sensor Fusion & Situational Intelligence"]
+        FE["SensorFusionEngine\n(Cases A-F Multimodal Fusion)"]
+        ST["SituationTracker\n(Lifecycles: STARTED -> RESOLVED)"]
+        ES["TemporalEventStore\n(Rolling 20s Memory)"]
         PE["PriorityEngine\n(0..100 Scoring Rule)"]
     end
 
+    subgraph Local_AI_Reasoning["Local AI Reasoning Layer"]
+        SC["SituationState\n(Structured Evidence Contract)"]
+        LAR["LocalAiReasoner\n(Anti-Hallucination Layer)"]
+        DRE["DeterministicReasoningEngine\n(0ms Fallback Base)"]
+    end
+
     subgraph Output_Layer["Output & Voice Layer"]
-        PA["ProactiveAlertCoordinator\n(HIGH-Priority Audio Alerts)"]
-        SUM["EventSummarizer & ChangeSummarizer\n(What Just Happened / What Changed)"]
-        TTS["TtsManager\n(Native Text-To-Speech)"]
+        PA["ProactiveAlertCoordinator\n(Proactive Speech & Haptics)"]
+        VCM["VoiceCommandManager\n(On-Device SpeechRecognizer)"]
+        TTS["TtsManager\n(Native Speech via STREAM_MUSIC)"]
+        HAP["HapticFeedbackManager\n(Tactile Vibrations)"]
         UI["Jetpack Compose UI\n(Debug Overlay & Controls)"]
     end
 
-    CAM --> VD --> TR --> MA --> SP
-    IMU --> SM --> MA
-    MIC --> AC --> ES
-    SP --> ES
-    ES --> CD
+    CAM --> VD --> TR --> MA --> FE
+    IMU --> SM --> FE
+    MIC --> AC --> FE
+    FE --> ES --> ST --> SC
     ES --> PE
+    SC --> LAR --> DRE --> TTS
     PE --> PA --> TTS
-    CD --> SUM
-    ES --> SUM
-    SUM --> TTS
-    PA --> UI
+    PA --> HAP
+    VCM --> LAR
+    FE --> UI
     PE --> UI
     AC --> UI
 ```
@@ -105,17 +128,28 @@ flowchart TD
 com.saikiran.pulse/
 ├── MainActivity.kt                      # Main Activity & Hardware Key Interceptor
 ├── audio/
-│   └── TtsManager.kt                    # Native Android TextToSpeech Manager
+│   ├── TtsManager.kt                    # Native Android TextToSpeech Manager (STREAM_MUSIC)
+│   ├── haptics/
+│   │   └── HapticFeedbackManager.kt    # Tactile Haptic Vibration Patterns
+│   └── voice/
+│       ├── VoiceCommandManager.kt       # On-Device SpeechRecognizer Manager
+│       ├── CommandParser.kt             # Deterministic Voice Command Parser
+│       ├── VoiceCommand.kt              # Voice Command Enum
+│       └── VoiceCommandState.kt         # Voice Session Lifecycle State
 ├── camera/
 │   └── CameraScreen.kt                  # Compose Screen, CameraX & Debug Panels
+├── device/
+│   ├── DeviceCapabilities.kt            # Hardware Capability Snapshot Model
+│   ├── DeviceCapabilityManager.kt       # Programmatic Hardware Discovery
+│   └── ThermalPowerManager.kt           # PowerManager Thermal Throttling Manager
 ├── perception/
 │   ├── vision/
 │   │   ├── PersonDetector.kt            # MediaPipe EfficientDet-Lite0 Detector
-│   │   ├── PersonTracker.kt             # IoU + Centroid Tracker with 3s Re-ID Memory
+│   │   ├── PersonTracker.kt             # Cost-Matrix Tracker with 3s Re-ID Memory
 │   │   ├── PersonAnalyzer.kt            # CameraX ImageAnalysis Frame Analyzer
 │   │   ├── PersonOverlayView.kt         # Custom Canvas Bounding Box & Label Overlay
 │   │   ├── movement/
-│   │   │   └── MovementAnalyzer.kt      # Trajectory & Approach Speed Classifier
+│   │   │   └── MovementAnalyzer.kt      # 2D Proportional Scale Trajectory Classifier
 │   │   └── spatial/
 │   │       └── SpatialPosition.kt       # Horizontal Zone & Distance FOV Calculator
 │   ├── audio/
@@ -124,6 +158,22 @@ com.saikiran.pulse/
 │   └── sensors/
 │       └── SensorMotionMonitor.kt       # Gyroscope & Linear Acceleration Monitor
 └── engine/
+    ├── evidence/
+    │   ├── SituationState.kt            # Structured Evidence Contract
+    │   ├── PersonState.kt               # Active Person Snapshot
+    │   └── AudioEventState.kt           # Environmental Sound Snapshot
+    ├── reasoning/
+    │   ├── LocalReasoningEngine.kt      # Reasoning Interface
+    │   ├── LocalAiReasoner.kt           # Local AI Reasoning Layer
+    │   ├── DeterministicReasoningEngine.kt # 0ms Fallback Base Engine
+    │   └── ReasoningResult.kt           # Reasoning Output Model
+    ├── situation/
+    │   ├── Situation.kt                 # Evolving Situation Data Model
+    │   ├── SituationTracker.kt          # Event Correlation & Lifecycle Manager
+    │   └── SituationLifecycleState.kt   # STARTED -> RESOLVED Enum
+    ├── fusion/
+    │   ├── SensorFusionEngine.kt        # Multimodal Fusion Engine (Cases A-F)
+    │   └── FusedEvent.kt                # Fused Diagnostic Model
     ├── events/
     │   ├── TemporalEventStore.kt        # Thread-Safe Rolling 20s Event Store
     │   └── SemanticEventProcessor.kt    # Transition Deduplication State Machine
@@ -134,7 +184,7 @@ com.saikiran.pulse/
     │   ├── PriorityEngine.kt            # Deterministic 0..100 Priority Scoring Engine
     │   └── PriorityDecision.kt          # Priority Decision Data Model
     ├── alerts/
-    │   └── ProactiveAlertCoordinator.kt # Bridges HIGH Priority Decisions to TTS
+    │   └── ProactiveAlertCoordinator.kt # Bridges HIGH Priority Decisions to TTS & Haptics
     └── summary/
         └── EventSummarizer.kt           # "What Just Happened?" Natural Language Engine
 ```
@@ -147,7 +197,7 @@ com.saikiran.pulse/
 * **Android Studio:** 2024.1+ (Ladybug / Jellyfish or newer).
 * **JDK:** Java 11 / 17.
 * **Android SDK:** `minSdk = 26` (Android 8.0+), `targetSdk = 37`.
-* **Hardware:** Physical Android device with Camera & Microphone (Tested on OnePlus Nord 4).
+* **Hardware:** Physical Android smartphone with Camera & Microphone (Tested on OnePlus Nord 4 & iQOO).
 
 ### Building & Running
 1. **Clone the Repository:**
@@ -157,29 +207,42 @@ com.saikiran.pulse/
    ```
 
 2. **Open in Android Studio:**
-   Open the project folder in Android Studio and perform a Gradle Sync.
+   Open project folder and perform a Gradle Sync.
 
-3. **Build Debug APK:**
+3. **Run Unit Tests:**
+   ```bash
+   ./gradlew testDebugUnitTest
+   ```
+
+4. **Build Debug APK:**
    ```bash
    ./gradlew app:assembleDebug
    ```
 
-4. **Install & Run on Device:**
+5. **Build Release APK:**
    ```bash
-   ./gradlew app:installDebug
+   ./gradlew app:assembleRelease
    ```
 
 ---
 
 ## 🎯 Usage Instructions
 
-1. **Launch App:** Grant Camera and Microphone permissions when prompted.
+1. **Launch App:** Grant Camera, Microphone, and Vibration permissions when prompted.
 2. **Point Camera:** Direct camera toward people walking or moving nearby.
-3. **Proactive Alerts:** Toggle **`PROACTIVE VOICE: ON`** in top header to receive automatic spoken alerts (*"Someone is approaching from your left"*).
-4. **Hardware Shortcuts:**
-   * **Click Volume Up:** Speaks *"What Just Happened?"* (summarizes recent 20s history).
-   * **Click Volume Down:** Speaks *"What Changed?"* (summarizes new changes since last query).
-5. **Debug Telemetry:** Inspect real-time Priority Scores, Proactive Audit Logs, and Audio Perception states in top debug panels.
+3. **Proactive Voice & Haptic Alerts:**
+   * High-urgency events automatically speak spatial warnings (*"Someone is approaching from your left"*) and trigger distinct haptic vibration pulses.
+4. **Explicit Voice Commands (Hands-Free):**
+   * Tap **`🎙️ VOICE COMMAND`** button (or press Volume keys) and speak naturally:
+     * *"What's happening?"* $\rightarrow$ Speaks current situation summary aloud.
+     * *"What just happened?"* $\rightarrow$ Speaks 20s rolling history summary.
+     * *"What changed?"* $\rightarrow$ Speaks unconsumed change deltas.
+     * *"Repeat that"* $\rightarrow$ Re-speaks last summary.
+     * *"Mute"* / *"Unmute"* $\rightarrow$ Toggles proactive speech output.
+5. **Hardware Shortcuts:**
+   * **Click Volume Up:** Speaks *"What Just Happened?"*.
+   * **Click Volume Down:** Speaks *"What Changed?"*.
+6. **Developer Debug Panels:** Real-time on-screen telemetry for Priority Decisions, Proactive Audits, Audio Perception, Sensor Fusion, Local AI Reasoning, and Voice Commands.
 
 ---
 
