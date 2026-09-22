@@ -241,6 +241,62 @@ fun CameraScreen(
                     ttsManager.speak("Proactive voice unmuted.")
                 }
 
+                VoiceCommand.IS_ANYONE_APPROACHING -> {
+                    val situation = buildSituationState()
+                    val result = localAiReasoner.answerQuestion("is someone approaching", situation)
+                    currentSummaryTitle = "Is Someone Approaching?"
+                    currentSummaryResult = SummaryResult(
+                        text = result.text,
+                        averageConfidence = result.confidence,
+                        isLowConfidence = result.isLowConfidence,
+                        eventCount = events.size,
+                    )
+                    showSummaryDialog = true
+                    ttsManager.speak(result.text)
+                }
+
+                VoiceCommand.WHERE_IS_PERSON -> {
+                    val situation = buildSituationState()
+                    val result = localAiReasoner.answerQuestion("where is person", situation)
+                    currentSummaryTitle = "Where is the Person?"
+                    currentSummaryResult = SummaryResult(
+                        text = result.text,
+                        averageConfidence = result.confidence,
+                        isLowConfidence = result.isLowConfidence,
+                        eventCount = events.size,
+                    )
+                    showSummaryDialog = true
+                    ttsManager.speak(result.text)
+                }
+
+                VoiceCommand.WHAT_DID_YOU_HEAR -> {
+                    val situation = buildSituationState()
+                    val result = localAiReasoner.answerQuestion("what did you hear", situation)
+                    currentSummaryTitle = "What Did You Hear?"
+                    currentSummaryResult = SummaryResult(
+                        text = result.text,
+                        averageConfidence = result.confidence,
+                        isLowConfidence = result.isLowConfidence,
+                        eventCount = events.size,
+                    )
+                    showSummaryDialog = true
+                    ttsManager.speak(result.text)
+                }
+
+                VoiceCommand.ANYTHING_IMPORTANT -> {
+                    val situation = buildSituationState()
+                    val result = localAiReasoner.answerQuestion("anything important", situation)
+                    currentSummaryTitle = "Anything Important?"
+                    currentSummaryResult = SummaryResult(
+                        text = result.text,
+                        averageConfidence = result.confidence,
+                        isLowConfidence = result.isLowConfidence,
+                        eventCount = events.size,
+                    )
+                    showSummaryDialog = true
+                    ttsManager.speak(result.text)
+                }
+
                 VoiceCommand.UNKNOWN -> {
                     val errorMsg = "I didn't understand that command."
                     currentSummaryTitle = "Voice Command"

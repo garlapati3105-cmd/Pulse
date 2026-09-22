@@ -24,6 +24,23 @@ object CommandParser {
             .replace(Regex("\\s+"), " ")
 
         return when {
+            // Situational queries
+            normalized.contains("is someone approaching") ||
+                    normalized.contains("is anyone approaching") ||
+                    normalized.contains("someone approaching") -> VoiceCommand.IS_ANYONE_APPROACHING
+
+            normalized.contains("where is that person") ||
+                    normalized.contains("where is the person") ||
+                    normalized.contains("where are they") ||
+                    normalized.contains("where is person") -> VoiceCommand.WHERE_IS_PERSON
+
+            normalized.contains("what did you hear") ||
+                    normalized.contains("what sound") ||
+                    normalized.contains("what audio") -> VoiceCommand.WHAT_DID_YOU_HEAR
+
+            normalized.contains("anything important") ||
+                    normalized.contains("is there anything important") -> VoiceCommand.ANYTHING_IMPORTANT
+
             // A: Current situation / What's happening
             normalized.contains("what's happening") ||
                     normalized.contains("what is happening") ||
