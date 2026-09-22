@@ -8,7 +8,7 @@
 [![MediaPipe](https://img.shields.io/badge/MediaPipe-0.10.14-00E676?style=flat-square)](https://developers.google.com/mediapipe)
 [![TensorFlow Lite](https://img.shields.io/badge/TensorFlow%20Lite-YAMNet-FF6F00?style=flat-square&logo=tensorflow)](https://www.tensorflow.org/lite)
 
-Pulse is an offline, privacy-first, on-device multimodal situational intelligence system built for Android smartphones and wearable smart camera devices. Operating 100% locally without cloud AI latency or internet connection dependencies, Pulse continuously transforms live camera frames, microphone streams, and phone IMU motion sensors into structured spatial memory, evolving situation lifecycles, and proactive natural language speech output.
+Pulse is an offline, privacy-first, on-device multimodal situational intelligence system built for Android smartphones and wearable smart camera devices. The core Pulse perception, memory, sensor fusion, and reasoning pipeline is designed to run on-device without requiring a cloud AI service, continuously transforming live camera frames, microphone streams, and phone IMU motion sensors into structured spatial memory, evolving situation lifecycles, and proactive natural language speech output.
 
 Designed around hands-free accessibility and real-world awareness, Pulse does not require the user to repeatedly point, tap, and ask for descriptions. Instead, it continuously perceives the environment in real time, filters out camera motion noise, tracks moving subjects across time and spatial zones, and proactively communicates critical events as they unfold.
 
@@ -47,7 +47,7 @@ Observe → Detect → Track → Fuse → Remember → Understand → Prioritize
 * **Multimodal Sensor Fusion:** Combines CameraX vision, YAMNet audio classification, and phone IMU motion sensors into a single, unified reasoning layer.
 * **Temporal Memory (20-Second Store):** Retains a rolling 20-second history of events to understand movement trajectories and state transitions.
 * **Proactive Speech & Haptic Alerts:** Automatically speaks high-priority warnings (*"Someone is approaching from your left"*) and triggers tactile vibration patterns without requiring user prompts.
-* **Grounded Local Reasoning:** Employs a structured evidence contract (`SituationState`) and on-device reasoning layer with zero-latency deterministic fallbacks, guaranteeing zero hallucinated subjects or sounds.
+* **Evidence-Grounded Local Reasoning:** Employs a structured evidence contract (`SituationState`) and local reasoning layer with zero-latency deterministic fallbacks, designed to prevent unsupported subjects, sounds, or actions from being introduced into responses.
 * **Hands-Free Control:** Supports physical volume button hotkeys and offline on-device voice queries (*"What's happening?"*, *"What changed?"*).
 
 ---
@@ -92,12 +92,12 @@ Observe → Detect → Track → Fuse → Remember → Understand → Prioritize
 ## 🌟 Key Capabilities
 
 ### 👁️ Vision Perception
-* **Person Detection:** MediaPipe Tasks Vision (`efficientdet_lite0.tflite` @ `0.25f` threshold) with C++ allowlisting for high-sensitivity detection of full bodies, upper bodies, close-ups, and side profiles.
+* **Person Detection:** MediaPipe Tasks Vision (`efficientdet_lite0.tflite` @ `0.25f` threshold) with MediaPipe category allowlisting for the `person` class, enabling high-sensitivity detection of full bodies, upper bodies, close-ups, and side profiles.
 * **Cost-Matrix Tracking:** Unified cost-matrix tracking ($Cost = (1 - IoU) \times 0.6 + DistRatio \times 0.4$) ensuring ID stability when subjects cross paths, backed by 3-second Re-ID memory.
-* **2D Proportional Scale Analysis:** Evaluates 2D width AND height expansion over 1.5s windows to distinguish physical approach ($\ge 10\%$ scale growth) from stationary posture shifts (arm raising, crouching/standing in place).
+* **2D Proportional Scale Analysis:** Evaluates 2D width AND height expansion over 1.5s windows to distinguish physical approach ($\ge 10\%$ scale growth) from stationary posture shifts (arm raising, crouching/standing in place) to filter out detector jitter.
 
 ### 🧭 Spatial Awareness
-* **Horizontal FOV Partitioning:** Divides camera field of view into `LEFT` ($< 35\%$), `CENTER` ($35\%\text{--}65\%$), and `RIGHT` ($> 65\%$).
+* **Horizontal FOV Partitioning:** Divides camera field of view into `LEFT` ($X < 35\%$), `CENTER` ($35\%\text{--}65\%$), and `RIGHT` ($X > 65\%$).
 * **Distance Mapping:** Maps relative subject height into `NEAR` ($\ge 40\%$), `MID` ($20\%\text{--}40\%$), and `FAR` ($< 20\%$).
 * **Natural Phrasing:** Generates spoken phrases like *"on your left nearby"* or *"in front of you"*.
 
@@ -113,16 +113,16 @@ Observe → Detect → Track → Fuse → Remember → Understand → Prioritize
 ### 🔗 Sensor Fusion
 * **Multimodal Correlation:** Fuses Vision, Audio, and IMU observations across a 2-second overlapping window (`SensorFusionEngine`).
 * **Safety & Provenance Rules:** Audio events never invent visual person tracks; lack of audio does not invalidate vision; vehicle horns are preserved as audio events without claiming a vehicle is visible unless visual vehicle evidence exists.
-* **Conservative Calibration:** Fused confidence is capped at `0.92f` to avoid false 100% certainty.
+* **Conservative Calibration:** Fused confidence is capped at `0.92f` to avoid false certainty.
 
 ### 🧠 Temporal & Situational Intelligence
 * **20-Second Memory Store:** Thread-safe rolling event store (`TemporalEventStore`) with automatic 20s eviction.
 * **Change Detector:** Tracks unconsumed state deltas (*"What Changed?"*) and drains the queue upon query to prevent repeating identical changes.
 * **Situation Lifecycles:** `SituationTracker` tracks situation states: `STARTED` $\rightarrow$ `ESCALATING` $\rightarrow$ `ACTIVE` $\rightarrow$ `CHANGED` $\rightarrow$ `DE_ESCALATING` $\rightarrow$ `RESOLVED`.
 
-### 🤖 Local AI Reasoning
+### 🤖 Local Reasoning Layer
 * **Structured Evidence Contract:** Serializes active subjects, sounds, recent events, and sensor states into `SituationState`.
-* **Anti-Hallucination Policy:** `LocalAiReasoner` generates responses grounded strictly in observed evidence, with 0ms fallback to `DeterministicReasoningEngine`.
+* **Evidence-Grounded Policy:** `LocalAiReasoner` generates responses grounded strictly in observed evidence, with 0ms fallback to `DeterministicReasoningEngine`. The architecture is designed to support local model-backed reasoning over structured evidence.
 
 ### 🎙️ Hands-Free Voice Interaction
 * **On-Device Speech Recognition:** Uses Android's native `SpeechRecognizer.createOnDeviceSpeechRecognizer` (`EXTRA_PREFER_OFFLINE = true`) without cloud speech APIs.
@@ -164,7 +164,7 @@ flowchart TD
 
     subgraph Local_AI_Reasoning["Local AI Reasoning Layer"]
         SC["SituationState\n(Structured Evidence Contract)"]
-        LAR["LocalAiReasoner\n(Anti-Hallucination Layer)"]
+        LAR["LocalAiReasoner\n(Evidence-Grounded Layer)"]
         DRE["DeterministicReasoningEngine\n(0ms Fallback Base)"]
     end
 
@@ -205,13 +205,13 @@ flowchart TD
 | **Speech Recognition** | Android On-Device SpeechRecognizer | Offline, single-shot voice command parsing |
 | **Voice Output** | Android TextToSpeech | Native speech synthesis routed via `STREAM_MUSIC` |
 | **Haptics** | Android Vibrator / VibrationEffect | Tactile feedback channel for priority alerts |
-| **Local Reasoning** | Deterministic & Evidence-Grounded Engine | Zero-latency, anti-hallucination situation reasoning |
+| **Local Reasoning** | Deterministic & Evidence-Grounded Engine | Zero-latency, evidence-grounded situation reasoning |
 
 ---
 
 ## 🔒 Privacy & On-Device Processing
 
-Pulse is designed to perform its core perception, memory, sensor fusion, and reasoning **100% locally on-device without requiring a cloud AI service**.
+The core Pulse perception, memory, sensor fusion, and reasoning pipeline is designed to run on-device without requiring a cloud AI service.
 
 * **Camera Processing:** Camera frames are processed directly in memory on a background thread and immediately closed; no video frames are recorded or transmitted over the network.
 * **Audio Perception:** Audio classification operates on local $100\text{ ms}$ PCM buffers in memory; no audio recordings are saved or uploaded.
@@ -262,7 +262,7 @@ com.saikiran.pulse/
     │   └── AudioEventState.kt           # Environmental Sound Snapshot
     ├── reasoning/
     │   ├── LocalReasoningEngine.kt      # Reasoning Interface
-    │   ├── LocalAiReasoner.kt           # Local AI Reasoning Layer
+    │   ├── LocalAiReasoner.kt           # Evidence-Grounded Reasoning Layer
     │   ├── DeterministicReasoningEngine.kt # 0ms Fallback Base Engine
     │   └── ReasoningResult.kt           # Reasoning Output Model
     ├── situation/
@@ -292,8 +292,8 @@ com.saikiran.pulse/
 ## 🚀 Getting Started
 
 ### Prerequisites
-* **Android Studio:** 2024.1+ (Ladybug / Jellyfish or newer).
-* **JDK:** Java 11 / 17.
+* **Android Studio:** Android Studio compatible with the project's current Gradle/Android Gradle Plugin configuration.
+* **JDK:** JDK compatible with the project's Gradle configuration.
 * **Android SDK:** `minSdk = 26` (Android 8.0+), `targetSdk = 37`.
 * **Physical Android Device:** Recommended for full testing because Pulse requires a physical camera, microphone, gyroscope, and acceleration sensors.
 
@@ -344,10 +344,12 @@ com.saikiran.pulse/
 
 Build and unit-test validation is currently passing across the codebase:
 
-* **Unit Test Status:** **`19/19 PASSED`** (`100% Unit Test Pass Rate`).
+* **Latest Unit-Test Run:** **`21/21 PASSED`** (`100% Unit Test Pass Rate`).
 * **Debug Build:** `app-debug.apk` (**$98.6\text{ MB}$**, `BUILD SUCCESSFUL`).
 * **Release Build:** `app-release-unsigned.apk` (**$93.35\text{ MB}$**, `BUILD SUCCESSFUL`).
 * **GitHub Synchronization:** Main branch up to date at [https://github.com/garlapati3105-cmd/Pulse.git](https://github.com/garlapati3105-cmd/Pulse.git).
+
+> *Note: `PULSE_PHASE_8_VALIDATION_REPORT.md` documents an earlier Phase 8 validation run with 8/8 tests passed; the repository has since added additional tests.*
 
 ---
 
@@ -375,11 +377,17 @@ Build and unit-test validation is currently passing across the codebase:
 * Tactile haptic feedback channel (`LOW`, `MEDIUM`, `HIGH`)
 * On-device offline voice command recognition
 * Structured evidence contract (`SituationState`)
-* Local AI reasoning layer with 0ms deterministic fallback
+* Local reasoning layer with 0ms deterministic fallback
 * Situational Intelligence & evolving situation lifecycles
 
 ### 🔄 In Progress / Next
-* Extended physical-device field testing in crowded environments
+* iQOO / smartphone device optimization
+* Physical-device field validation
+* CPU / RAM / latency / thermal profiling
+* Final UX and accessibility polish
+* Final demo video & submission preparation
+
+### 🔭 Future Directions
 * Bluetooth wearable audio headset routing
 * Wearable smart-glass HUD display integration
 * App Bundle (`.aab`) ABI split optimization ($\sim 28\text{ MB}$ download footprint)
