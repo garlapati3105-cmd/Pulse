@@ -36,6 +36,17 @@ class TtsManager(context: Context) : TextToSpeech.OnInitListener {
 
     override fun onInit(status: Int) {
         if (status == TextToSpeech.SUCCESS) {
+            // Set AudioAttributes for standard media speaker output
+            try {
+                val audioAttributes = AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_MEDIA)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                    .build()
+                tts?.setAudioAttributes(audioAttributes)
+            } catch (e: Exception) {
+                Log.w(TAG, "Could not set TTS AudioAttributes", e)
+            }
+
             // Try default device locale first (e.g. en_GB, en_IN, en_US)
             var result = tts?.setLanguage(Locale.getDefault())
 
@@ -47,29 +58,13 @@ class TtsManager(context: Context) : TextToSpeech.OnInitListener {
                 result = tts?.setLanguage(Locale.ENGLISH)
             }
 
-            if ((result == TextToSpeech.LANG_MISSING_DATA) || (result == TextToSpeech.LANG_NOT_SUPPORTED)) {
-                Log.e(TAG, "TTS language missing data or not supported.")
-                isInitialized = false
-            } else {
-                isInitialized = true
-                Log.d(TAG, "TextToSpeech initialised successfully.")
+            isInitialized = true
+            Log.d(TAG, "TextToSpeech initialised successfully with language result $result.")
 
-                // Set AudioAttributes for standard media speaker output
-                try {
-                    val audioAttributes = AudioAttributes.Builder()
-                        .setUsage(AudioAttributes.USAGE_MEDIA)
-                        .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
-                        .build()
-                    tts?.setAudioAttributes(audioAttributes)
-                } catch (e: Exception) {
-                    Log.w(TAG, "Could not set TTS AudioAttributes", e)
-                }
-
-                // If a speak request arrived while TTS was initializing, speak it now
-                pendingTextToSpeak?.let { pending ->
-                    pendingTextToSpeak = null
-                    speak(pending)
-                }
+            // If a speak request arrived while TTS was initializing, speak it now
+            pendingTextToSpeak?.let { pending ->
+                pendingTextToSpeak = null
+                speak(pending)
             }
         } else {
             Log.e(TAG, "TextToSpeech initialisation failed with status: $status")
@@ -97,9 +92,17 @@ class TtsManager(context: Context) : TextToSpeech.OnInitListener {
                 putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, 1.0f)
             }
             val status = tts?.speak(text, TextToSpeech.QUEUE_FLUSH, params, UTTERANCE_ID)
-            Log.d(TAG, "tts.speak() executed with status $status for text: \"$text\"")
+            if (status != TextToSpeech.SUCCESS) {
+                Log.w(TAG, "tts.speak() with stream params returned $status; retrying with default audio attributes")
+                tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, UTTERANCE_ID)
+            } else {
+                Log.d(TAG, "tts.speak() executed successfully for text: \"$text\"")
+            }
         } catch (e: Exception) {
             Log.e(TAG, "Error in TTS speak()", e)
+            try {
+                tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, UTTERANCE_ID)
+            } catch (ignored: Exception) {}
         }
     }
 
