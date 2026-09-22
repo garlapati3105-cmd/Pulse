@@ -2,6 +2,7 @@ package com.saikiran.pulse.engine.alerts
 
 import android.util.Log
 import com.saikiran.pulse.audio.TtsManager
+import com.saikiran.pulse.audio.haptics.HapticFeedbackManager
 import com.saikiran.pulse.engine.events.EventType
 import com.saikiran.pulse.engine.priority.PriorityDecision
 import com.saikiran.pulse.engine.priority.PriorityLevel
@@ -30,7 +31,7 @@ data class ProactiveAlertAuditLog(
 }
 
 /**
- * Proactive Alert Coordinator that bridges [PriorityEngine] decisions to [TtsManager].
+ * Proactive Alert Coordinator that bridges [PriorityEngine] decisions to [TtsManager] and [HapticFeedbackManager].
  *
  * Behavior & Rules:
  *  1. Only [PriorityLevel.HIGH] decisions with [speakNow = true] trigger automatic speech.
@@ -39,9 +40,11 @@ data class ProactiveAlertAuditLog(
  *  4. [isMuted] toggle silences proactive speech without disabling detection or memory.
  *  5. Interruption Policy: Higher-scoring events interrupt ongoing lower-scoring speech.
  *  6. Deduplication: Suppresses repeated speech while a person's stable state remains unchanged.
+ *  7. Tactile Haptic Channel: Triggers tactile haptic feedback pattern matching event priority level.
  */
 class ProactiveAlertCoordinator(
     private val ttsManager: TtsManager,
+    private val hapticFeedbackManager: HapticFeedbackManager? = null,
 ) {
     @Volatile
     var isProactiveVoiceEnabled: Boolean = true
@@ -68,6 +71,13 @@ class ProactiveAlertCoordinator(
             val now = System.currentTimeMillis()
             val event = decision.event
 
+            // Trigger tactile haptic feedback matching priority level
+            try {
+                hapticFeedbackManager?.triggerHapticForPriority(decision.priority)
+            } catch (e: Exception) {
+                Log.w(TAG, "Haptic trigger error", e)
+            }
+
             // Rule 1: Check master toggles
             if (!isProactiveVoiceEnabled) {
                 logAudit(decision, isSpoken = false, reason = "Proactive Voice is OFF")
@@ -79,7 +89,7 @@ class ProactiveAlertCoordinator(
                 return
             }
 
-            // Rule 2: ONLY HIGH priority triggers automatic speech in Milestone 6B
+            // Rule 2: ONLY HIGH priority triggers automatic speech
             if (decision.priority != PriorityLevel.HIGH || !decision.speakNow) {
                 val reason = when (decision.priority) {
                     PriorityLevel.MEDIUM -> "Silent: MEDIUM priority"
