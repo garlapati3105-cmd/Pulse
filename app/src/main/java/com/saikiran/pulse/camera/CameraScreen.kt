@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -36,15 +37,16 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.saikiran.pulse.audio.TtsManager
+import com.saikiran.pulse.audio.haptics.HapticFeedbackManager
 import com.saikiran.pulse.audio.voice.VoiceCommand
 import com.saikiran.pulse.audio.voice.VoiceCommandManager
 import com.saikiran.pulse.audio.voice.VoiceCommandState
 import com.saikiran.pulse.engine.alerts.ProactiveAlertCoordinator
 import com.saikiran.pulse.engine.evidence.AudioEventState
-import com.saikiran.pulse.engine.evidence.PersonState
 import com.saikiran.pulse.engine.evidence.SituationState
 import com.saikiran.pulse.engine.priority.PriorityLevel
 import com.saikiran.pulse.engine.reasoning.LocalAiReasoner
+import com.saikiran.pulse.engine.summary.EventSummarizer
 import com.saikiran.pulse.engine.summary.SummaryResult
 import com.saikiran.pulse.perception.audio.AudioPerceptionManager
 import com.saikiran.pulse.perception.audio.AudioPerceptionState
@@ -54,6 +56,7 @@ import com.saikiran.pulse.perception.vision.PersonDetectionListener
 import com.saikiran.pulse.perception.vision.PersonDetectionResult
 import com.saikiran.pulse.perception.vision.PersonDetector
 import com.saikiran.pulse.perception.vision.PersonOverlayView
+import com.saikiran.pulse.ui.PulseOnboardingCard
 import java.util.concurrent.Executors
 
 @Composable
@@ -79,16 +82,28 @@ fun CameraScreen(
     // Native TextToSpeech manager for spoken natural language summaries
     val ttsManager = remember { TtsManager(context) }
 
+    // Tactile Haptic Feedback Channel (Phase 11)
+    val hapticFeedbackManager = remember { HapticFeedbackManager(context) }
+
     // On-Device Voice Command Manager (Milestone 7C)
     val voiceCommandManager = remember { VoiceCommandManager(context) }
 
     // Local AI Reasoning Layer (Phase 9)
     val localAiReasoner = remember { LocalAiReasoner() }
 
-    // Proactive Alert Coordinator (Milestone 6B) - Defaults to ON for testing
-    val proactiveAlertCoordinator = remember { ProactiveAlertCoordinator(ttsManager) }
+    // Proactive Alert Coordinator (Milestone 6B & Phase 11 Haptics)
+    val proactiveAlertCoordinator = remember { ProactiveAlertCoordinator(ttsManager, hapticFeedbackManager) }
     var isProactiveVoiceEnabled by remember { mutableStateOf(true) } // Default ON for testing
     var isMuted by remember { mutableStateOf(false) }
+
+    // Developer Telemetry Mode Toggle (Phase 12 UX Polish)
+    var isDeveloperModeEnabled by remember { mutableStateOf(false) }
+
+    // Demo Mode Guide State (Phase 12 Demo Polish)
+    var showDemoGuideDialog by remember { mutableStateOf(false) }
+
+    // First Launch Onboarding State (Phase 12 Onboarding)
+    var showOnboardingCard by remember { mutableStateOf(true) }
 
     // Reference to the overlay view so the detector callback can update it
     val overlayRef = remember { mutableStateOf<PersonOverlayView?>(null) }
@@ -432,7 +447,7 @@ fun CameraScreen(
             }
         )
 
-        // ── Priority Engine & Proactive Alert Debug Panel (Milestones 6A, 6B, 7A, 7B, 7C, Phase 9) ─
+        // ── Clean Operational Status Bar or Developer Telemetry Panels ───────────
         Column(
             modifier = Modifier
                 .align(Alignment.TopStart)
@@ -440,7 +455,118 @@ fun CameraScreen(
                 .fillMaxWidth(0.55f),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            latestPriorityDecision?.let { decision ->
+            if (!isDeveloperModeEnabled) {
+                // ── Clean Product Status Card for Judges & Users ─────────────────
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(Color.Black.copy(alpha = 0.75f), shape = RoundedCornerShape(12.dp))
+                        .padding(12.dp)
+                ) {
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Text(text = "●", color = Color(0xFF00E676), fontWeight = FontWeight.Bold)
+                            Text(
+                                text = "PULSE ACTIVE",
+                                color = Color.White,
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                        Text(
+                            text = "Camera: READY (30 FPS)",
+                            color = Color.LightGray,
+                            style = MaterialTheme.typography.labelSmall
+                        )
+                        Text(
+                            text = "Audio: LISTENING (16kHz)",
+                            color = Color.LightGray,
+                            style = MaterialTheme.typography.labelSmall
+                        )
+                        Text(
+                            text = "Reasoning: LOCAL ON-DEVICE",
+                            color = Color(0xFF29B6F6),
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+            } else {
+                // ── Developer Telemetry Panels ──────────────────────────────────
+                latestPriorityDecision?.let { decision ->
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(Color.Black.copy(alpha = 0.75f))
+                            .padding(10.dp)
+                    ) {
+                        Column {
+                            Text(
+                                text = "── Priority Decision (6A) ──",
+                                color = Color(0xFF00E676),
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                            )
+                            Text(
+                                text = "Event: ${decision.event.description}",
+                                color = Color.White,
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                            Text(
+                                text = "Priority: ${decision.priority} (Score: ${decision.score})",
+                                color = when (decision.priority) {
+                                    PriorityLevel.HIGH -> Color(0xFFFF5252)
+                                    PriorityLevel.MEDIUM -> Color(0xFFFFB74D)
+                                    PriorityLevel.LOW -> Color.Gray
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                                fontWeight = FontWeight.Bold,
+                            )
+                            Text(
+                                text = "Action: ${if (decision.speakNow) "SPEAK NOW" else "IGNORE / COOLDOWN"}",
+                                color = if (decision.speakNow) Color(0xFF00E676) else Color.LightGray,
+                                style = MaterialTheme.typography.bodySmall,
+                                fontWeight = FontWeight.Bold,
+                            )
+                        }
+                    }
+                }
+
+                latestAuditLog?.let { audit ->
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(Color.Black.copy(alpha = 0.75f))
+                            .padding(10.dp)
+                    ) {
+                        Column {
+                            Text(
+                                text = "── Proactive Audit (6B) ──",
+                                color = Color(0xFF29B6F6),
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                            )
+                            Text(
+                                text = "Event: ${audit.eventDescription}",
+                                color = Color.White,
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                            Text(
+                                text = "Spoken?: ${if (audit.isSpoken) "YES" else "NO"} (${audit.formattedTime()})",
+                                color = if (audit.isSpoken) Color(0xFF00E676) else Color(0xFFFFB74D),
+                                style = MaterialTheme.typography.bodySmall,
+                                fontWeight = FontWeight.Bold,
+                            )
+                            Text(
+                                text = audit.reason,
+                                color = Color.LightGray,
+                                style = MaterialTheme.typography.labelSmall,
+                            )
+                        }
+                    }
+                }
+
+                // ── Environmental Audio Perception Debug Panel ───────────
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -449,210 +575,102 @@ fun CameraScreen(
                 ) {
                     Column {
                         Text(
-                            text = "── Priority Decision (6A) ──",
-                            color = Color(0xFF00E676),
+                            text = "── Audio Perception (7A) ──",
+                            color = Color(0xFFFF4081),
                             style = MaterialTheme.typography.labelSmall,
                             fontWeight = FontWeight.Bold,
                         )
                         Text(
-                            text = "Event: ${decision.event.description}",
-                            color = Color.White,
-                            style = MaterialTheme.typography.bodySmall,
-                        )
-                        Text(
-                            text = "Priority: ${decision.priority} (Score: ${decision.score})",
-                            color = when (decision.priority) {
-                                PriorityLevel.HIGH -> Color(0xFFFF5252)
-                                PriorityLevel.MEDIUM -> Color(0xFFFFB74D)
-                                PriorityLevel.LOW -> Color.Gray
+                            text = "State: $audioState",
+                            color = when (audioState) {
+                                AudioPerceptionState.LISTENING -> Color(0xFF00E676)
+                                AudioPerceptionState.NO_PERMISSION -> Color(0xFFFFB74D)
+                                AudioPerceptionState.ERROR -> Color(0xFFFF5252)
+                                else -> Color.Gray
                             },
                             style = MaterialTheme.typography.bodySmall,
                             fontWeight = FontWeight.Bold,
                         )
-                        Text(
-                            text = "Action: ${if (decision.speakNow) "SPEAK NOW" else "IGNORE / COOLDOWN"}",
-                            color = if (decision.speakNow) Color(0xFF00E676) else Color.LightGray,
-                            style = MaterialTheme.typography.bodySmall,
-                            fontWeight = FontWeight.Bold,
-                        )
-                    }
-                }
-            }
-
-            latestAuditLog?.let { audit ->
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(Color.Black.copy(alpha = 0.75f))
-                        .padding(10.dp)
-                ) {
-                    Column {
-                        Text(
-                            text = "── Proactive Audit (6B) ──",
-                            color = Color(0xFF29B6F6),
-                            style = MaterialTheme.typography.labelSmall,
-                            fontWeight = FontWeight.Bold,
-                        )
-                        Text(
-                            text = "Event: ${audit.eventDescription}",
-                            color = Color.White,
-                            style = MaterialTheme.typography.bodySmall,
-                        )
-                        Text(
-                            text = "Spoken?: ${if (audit.isSpoken) "YES" else "NO"} (${audit.formattedTime()})",
-                            color = if (audit.isSpoken) Color(0xFF00E676) else Color(0xFFFFB74D),
-                            style = MaterialTheme.typography.bodySmall,
-                            fontWeight = FontWeight.Bold,
-                        )
-                        Text(
-                            text = audit.reason,
+                        latestAudioEvent?.let { audioEvent ->
+                            Text(
+                                text = "Sound: ${audioEvent.soundType.name} (${audioEvent.label})",
+                                color = Color.White,
+                                style = MaterialTheme.typography.bodySmall,
+                                fontWeight = FontWeight.Bold,
+                            )
+                            Text(
+                                text = "Conf: ${(audioEvent.confidence * 100).toInt()}% (${audioEvent.formattedTime()})",
+                                color = Color.LightGray,
+                                style = MaterialTheme.typography.labelSmall,
+                            )
+                        } ?: Text(
+                            text = "Sound: None detected",
                             color = Color.LightGray,
                             style = MaterialTheme.typography.labelSmall,
                         )
                     }
                 }
-            }
 
-            // ── Environmental Audio Perception Debug Panel (Milestone 7A) ───
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(Color.Black.copy(alpha = 0.75f))
-                    .padding(10.dp)
-            ) {
-                Column {
-                    Text(
-                        text = "── Audio Perception (7A) ──",
-                        color = Color(0xFFFF4081),
-                        style = MaterialTheme.typography.labelSmall,
-                        fontWeight = FontWeight.Bold,
-                    )
-                    Text(
-                        text = "State: $audioState",
-                        color = when (audioState) {
-                            AudioPerceptionState.LISTENING -> Color(0xFF00E676)
-                            AudioPerceptionState.NO_PERMISSION -> Color(0xFFFFB74D)
-                            AudioPerceptionState.ERROR -> Color(0xFFFF5252)
-                            else -> Color.Gray
-                        },
-                        style = MaterialTheme.typography.bodySmall,
-                        fontWeight = FontWeight.Bold,
-                    )
-                    latestAudioEvent?.let { audioEvent ->
-                        Text(
-                            text = "Sound: ${audioEvent.soundType.name} (${audioEvent.label})",
-                            color = Color.White,
-                            style = MaterialTheme.typography.bodySmall,
-                            fontWeight = FontWeight.Bold,
-                        )
-                        Text(
-                            text = "Conf: ${(audioEvent.confidence * 100).toInt()}% (${audioEvent.formattedTime()})",
-                            color = Color.LightGray,
-                            style = MaterialTheme.typography.labelSmall,
-                        )
-                    } ?: Text(
-                        text = "Sound: None detected",
-                        color = Color.LightGray,
-                        style = MaterialTheme.typography.labelSmall,
-                    )
-                }
-            }
-
-            // ── Sensor Fusion Engine Debug Panel (Milestone 7B) ─────────────
-            latestFusedEvent?.let { fused ->
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(Color.Black.copy(alpha = 0.75f))
-                        .padding(10.dp)
-                ) {
-                    Column {
-                        Text(
-                            text = "── Sensor Fusion Engine (7B) ──",
-                            color = Color(0xFFE040FB),
-                            style = MaterialTheme.typography.labelSmall,
-                            fontWeight = FontWeight.Bold,
-                        )
-                        Text(
-                            text = "Event: ${fused.eventType.name}",
-                            color = Color.White,
-                            style = MaterialTheme.typography.bodySmall,
-                        )
-                        Text(
-                            text = "Vision Conf: ${fused.visionConfidence?.let { "${(it * 100).toInt()}%" } ?: "N/A"}",
-                            color = Color.LightGray,
-                            style = MaterialTheme.typography.labelSmall,
-                        )
-                        Text(
-                            text = "Audio: ${fused.audioType ?: "NONE"} ${fused.audioConfidence?.let { "(${(it * 100).toInt()}%)" } ?: ""}",
-                            color = Color.LightGray,
-                            style = MaterialTheme.typography.labelSmall,
-                        )
-                        Text(
-                            text = "IMU State: ${fused.imuState ?: "N/A"}",
-                            color = Color.LightGray,
-                            style = MaterialTheme.typography.labelSmall,
-                        )
-                        Text(
-                            text = "Fused Confidence: ${(fused.fusedConfidence * 100).toInt()}%",
-                            color = if (fused.fusedConfidence >= 0.7f) Color(0xFF00E676) else if (fused.fusedConfidence >= 0.45f) Color(0xFFFFB74D) else Color.Red,
-                            style = MaterialTheme.typography.bodySmall,
-                            fontWeight = FontWeight.Bold,
-                        )
-                        Text(
-                            text = "Sources: ${fused.supportingSources.joinToString(" + ") { it.name }}",
-                            color = Color(0xFF29B6F6),
-                            style = MaterialTheme.typography.labelSmall,
-                        )
-                        Text(
-                            text = "Reason: ${fused.reason}",
-                            color = Color.LightGray,
-                            style = MaterialTheme.typography.labelSmall,
-                        )
+                // ── Sensor Fusion Engine Debug Panel ─────────────────────
+                latestFusedEvent?.let { fused ->
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(Color.Black.copy(alpha = 0.75f))
+                            .padding(10.dp)
+                    ) {
+                        Column {
+                            Text(
+                                text = "── Sensor Fusion Engine (7B) ──",
+                                color = Color(0xFFE040FB),
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                            )
+                            Text(
+                                text = "Event: ${fused.eventType.name}",
+                                color = Color.White,
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                            Text(
+                                text = "Sources: ${fused.supportingSources.joinToString(" + ") { it.name }}",
+                                color = Color(0xFF29B6F6),
+                                style = MaterialTheme.typography.labelSmall,
+                            )
+                            Text(
+                                text = "Reason: ${fused.reason}",
+                                color = Color.LightGray,
+                                style = MaterialTheme.typography.labelSmall,
+                            )
+                        }
                     }
-                }
-            }
-
-            // ── Local AI Reasoning Debug Panel (Phase 9) ───────────────────
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(Color.Black.copy(alpha = 0.75f))
-                    .padding(10.dp)
-            ) {
-                Column {
-                    Text(
-                        text = "── Local AI Reasoning (Phase 9) ──",
-                        color = Color(0xFFFFD54F), // Amber
-                        style = MaterialTheme.typography.labelSmall,
-                        fontWeight = FontWeight.Bold,
-                    )
-                    Text(
-                        text = "Engine: LocalAiReasoner (Deterministic Base)",
-                        color = Color(0xFF00E676),
-                        style = MaterialTheme.typography.labelSmall,
-                    )
-                    Text(
-                        text = "Contract: SituationState (JSON/Text)",
-                        color = Color.LightGray,
-                        style = MaterialTheme.typography.labelSmall,
-                    )
                 }
             }
         }
 
-        // ── Top Header Controls (Proactive Voice & Mute Toggles) ────────────
+        // ── Top Header Controls (Mute, Proactive, Dev Mode & Demo Buttons) ────────────
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .align(Alignment.TopEnd)
                 .padding(top = 40.dp, end = 16.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+            horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.End),
         ) {
             Button(
-                onClick = {
-                    isMuted = !isMuted
-                },
+                onClick = { isDeveloperModeEnabled = !isDeveloperModeEnabled },
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = if (isDeveloperModeEnabled) Color(0xFFFFD54F) else Color(0xFF333333),
+                    contentColor = if (isDeveloperModeEnabled) Color.Black else Color.White,
+                ),
+            ) {
+                Text(
+                    text = if (isDeveloperModeEnabled) "DEV: ON" else "DEV: OFF",
+                    fontWeight = FontWeight.Bold,
+                    style = MaterialTheme.typography.labelSmall,
+                )
+            }
+
+            Button(
+                onClick = { isMuted = !isMuted },
                 colors = ButtonDefaults.buttonColors(
                     containerColor = if (isMuted) Color(0xFFFFB74D) else Color(0xFF424242),
                     contentColor = Color.White,
@@ -661,23 +679,21 @@ fun CameraScreen(
                 Text(
                     text = if (isMuted) "MUTE: ON" else "MUTE: OFF",
                     fontWeight = FontWeight.Bold,
-                    style = MaterialTheme.typography.labelMedium,
+                    style = MaterialTheme.typography.labelSmall,
                 )
             }
 
             Button(
-                onClick = {
-                    isProactiveVoiceEnabled = !isProactiveVoiceEnabled
-                },
+                onClick = { isProactiveVoiceEnabled = !isProactiveVoiceEnabled },
                 colors = ButtonDefaults.buttonColors(
                     containerColor = if (isProactiveVoiceEnabled) Color(0xFFFF5252) else Color(0xFF424242),
                     contentColor = Color.White,
                 ),
             ) {
                 Text(
-                    text = if (isProactiveVoiceEnabled) "PROACTIVE VOICE: ON" else "PROACTIVE VOICE: OFF",
+                    text = if (isProactiveVoiceEnabled) "VOICE: ON" else "VOICE: OFF",
                     fontWeight = FontWeight.Bold,
-                    style = MaterialTheme.typography.labelMedium,
+                    style = MaterialTheme.typography.labelSmall,
                 )
             }
         }
@@ -691,9 +707,20 @@ fun CameraScreen(
             horizontalAlignment = Alignment.End,
         ) {
             Button(
-                onClick = {
-                    triggerVoiceInput()
-                },
+                onClick = { showDemoGuideDialog = true },
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = Color(0xFFFFD54F),
+                    contentColor = Color.Black,
+                ),
+            ) {
+                Text(
+                    text = "🎥 DEMO GUIDE",
+                    fontWeight = FontWeight.Bold,
+                )
+            }
+
+            Button(
+                onClick = { triggerVoiceInput() },
                 colors = ButtonDefaults.buttonColors(
                     containerColor = when (voiceCommandState) {
                         VoiceCommandState.LISTENING -> Color(0xFFFF5252)
@@ -757,27 +784,59 @@ fun CameraScreen(
             }
         }
 
-        // ── Developer Debug Event History Panel ─────────────────────────────
-        if (events.isNotEmpty()) {
+        // ── First-Launch Onboarding Card ─────────────────────────────────────
+        if (showOnboardingCard) {
+            PulseOnboardingCard(
+                onDismiss = { showOnboardingCard = false }
+            )
+        }
+
+        // ── Demo Guide Dialog ────────────────────────────────────────────────
+        if (showDemoGuideDialog) {
             Box(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .align(Alignment.BottomCenter)
-                    .background(Color.Black.copy(alpha = 0.75f))
-                    .padding(12.dp)
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.80f)),
+                contentAlignment = Alignment.Center,
             ) {
-                Column {
-                    Text(
-                        text = "── Event History (Rolling 20s) ──",
-                        color = Color.Green,
-                        style = MaterialTheme.typography.labelMedium,
-                    )
-                    events.takeLast(4).forEach { event ->
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth(0.92f)
+                        .padding(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFF1E1E1E)),
+                ) {
+                    Column(
+                        modifier = Modifier.padding(20.dp),
+                    ) {
                         Text(
-                            text = "${event.formattedTime()}  ${event.description}",
-                            color = Color.White,
-                            style = MaterialTheme.typography.bodySmall,
+                            text = "🎥 Pulse Demo Walkthrough",
+                            style = MaterialTheme.typography.titleLarge,
+                            color = Color(0xFFFFD54F),
+                            fontWeight = FontWeight.Bold,
                         )
+
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        Text(
+                            text = "1. OBSERVE: Direct camera at space around you.\n" +
+                                    "2. DETECT: Person & audio perception run locally.\n" +
+                                    "3. UNDERSTAND: Motion & FOV zones evaluated.\n" +
+                                    "4. ALERT: Proactive voice speaks high-urgency alerts.\n" +
+                                    "5. QUERY: Tap 'Voice Command' & ask 'What's happening?'",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = Color.White,
+                        )
+
+                        Spacer(modifier = Modifier.height(16.dp))
+
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                            Button(
+                                onClick = { showDemoGuideDialog = false },
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00E676), contentColor = Color.Black)
+                            ) {
+                                Text("CLOSE GUIDE")
+                            }
+                        }
                     }
                 }
             }
@@ -796,9 +855,7 @@ fun CameraScreen(
                     modifier = Modifier
                         .fillMaxWidth(0.90f)
                         .padding(16.dp),
-                    colors = CardDefaults.cardColors(
-                        containerColor = Color(0xFF1E1E1E),
-                    ),
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFF1E1E1E)),
                 ) {
                     Column(
                         modifier = Modifier.padding(20.dp),
@@ -837,13 +894,8 @@ fun CameraScreen(
                             horizontalArrangement = Arrangement.End,
                         ) {
                             Button(
-                                onClick = {
-                                    currentSummaryResult?.let { ttsManager.speak(it.text) }
-                                },
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = Color(0xFF424242),
-                                    contentColor = Color.White,
-                                ),
+                                onClick = { currentSummaryResult?.let { ttsManager.speak(it.text) } },
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF424242), contentColor = Color.White),
                                 modifier = Modifier.padding(end = 8.dp),
                             ) {
                                 Text("REPEAT")
@@ -854,10 +906,7 @@ fun CameraScreen(
                                     ttsManager.stop()
                                     showSummaryDialog = false
                                 },
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = Color(0xFF00E676),
-                                    contentColor = Color.Black,
-                                ),
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00E676), contentColor = Color.Black),
                             ) {
                                 Text("DISMISS")
                             }
